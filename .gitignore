@@ -1,0 +1,5 @@
+iso/boot/myos.iso
+iso/boot/myos.bin
+*.o
+*/*.o
+*.img
