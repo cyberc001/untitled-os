@@ -174,12 +174,14 @@ int fs_ext2_iterate_dir_next(ata_drive* drive, fs_ext2_sb* sb, fs_ext2_dir_itera
 
 	it->byteaddr += it->cur.entry_sz;
 	if(it->byteaddr >= FS_EXT2_SB_BLOCKSIZE(*sb)){ // extended past current block, changing to another one
-		it->byteaddr = 0;
 		it->blki++;
 		if(!fs_ext2_read_inode_data(drive, sb, it->dir, it->blki, it->blkbuf)){
+			it->blki--;
+			it->byteaddr -= it->cur.entry_sz;
 			it->is_valid = 0;
 			return 1;
 		}
+		it->byteaddr = 0;
 	}
 	return 1;
 	#undef DIRENT_SZ_WO_NAME
@@ -219,15 +221,66 @@ uint32_t fs_ext2_find_unalloc_block(ata_drive* drive, fs_ext2_sb* sb,
 	{
 		uint32_t ubi = fs_ext2_find_grp_unalloc_block(drive, sb, bt, bi);
 		if(ubi != (uint32_t)-1)
-			return ubi;
+			return bi * sb->blocks_per_group + ubi;
 	}
 	for(uint32_t bi2 = 0; bi2 < bi; ++bi2)
 	{
 		uint32_t ubi = fs_ext2_find_grp_unalloc_block(drive, sb, bt, bi2);
 		if(ubi != (uint32_t)-1)
-			return ubi;
+			return bi * sb->blocks_per_group + ubi;
 	}
 	return (uint32_t)-1;
+}
+
+uint32_t fs_ext2_find_grp_unalloc_inode(ata_drive* drive, fs_ext2_sb* sb,
+					fs_ext2_blkgrp_table* bt, uint32_t blkgrp)
+{
+	void* buf = kmalloc(FS_EXT2_SB_BLOCKSIZE(*sb));
+
+	for(size_t bmb = bt->groups[blkgrp].inode_bitmap_addr;
+		bmb < bt->groups[blkgrp].inode_bitmap_addr +
+		(sb->inodes_per_group / (8 * FS_EXT2_SB_BLOCKSIZE(*sb))) +
+		!!(sb->inodes_per_group % (8 * FS_EXT2_SB_BLOCKSIZE(*sb)));
+		++bmb)
+	{
+		drive->read(drive, bmb * FS_EXT2_SB_BLOCKSECTORS(*sb),
+				FS_EXT2_SB_BLOCKSECTORS(*sb), buf);
+		for(uint32_t bind = 0; bind < FS_EXT2_SB_BLOCKSIZE(*sb); ++bind)
+		{
+			// TODO make more advanced check for reserved inodes
+			if(blkgrp * sb->inodes_per_group + bind * 8 <= sb->first_unres_inode)
+				continue;
+
+			uint8_t b = ((uint8_t*)buf)[bind];
+			if(b != 255){
+				uint8_t bsh = 0;
+				while(b & 1) { b >>= 1; bsh++; }
+
+				kfree(buf);
+				return (bind * 8 + (7 - bsh)) + 1;
+			}
+		}
+	}
+
+	kfree(buf);
+	return 0;
+}
+uint32_t fs_ext2_find_unalloc_inode(ata_drive* drive, fs_ext2_sb* sb,
+					fs_ext2_blkgrp_table* bt, uint32_t blkgrp_start)
+{
+	uint32_t bi; for(bi = blkgrp_start; bi < bt->length; ++bi)
+	{
+		uint32_t inum = fs_ext2_find_grp_unalloc_inode(drive, sb, bt, bi);
+		if(inum != 0)
+			return bi * sb->inodes_per_group + inum;
+	}
+	for(uint32_t bi2 = 0; bi2 < bi; ++bi2)
+	{
+		uint32_t inum = fs_ext2_find_grp_unalloc_inode(drive, sb, bt, bi2);
+		if(inum != 0)
+			return bi * sb->inodes_per_group + inum;
+	}
+	return 0;
 }
 
 
@@ -346,16 +399,15 @@ void fs_ext2_write_inode(ata_drive* drive, fs_ext2_sb* sb, fs_ext2_blkgrp_table*
 				uint32_t inode_num, fs_ext2_inode* _in)
 {
 	uint32_t blkgrp = (inode_num - 1) / sb->inodes_per_group;
-	uint32_t tind = (inode_num - 1) % sb->inodes_per_group; // index withing block group
-	uint32_t saddr = (tind * sb->inode_size) / ATA_SECTOR_SIZE;
+	uint32_t tind = (inode_num - 1) % sb->inodes_per_group;
+	uint32_t baddr = (tind * sb->inode_size) / FS_EXT2_SB_BLOCKSIZE(*sb);
 
-	void* buf = kmalloc(ATA_SECTOR_SIZE);
-
-	drive->read(drive, bt->groups[blkgrp].inode_table_addr * FS_EXT2_SB_BLOCKSECTORS(*sb) + saddr,
-			1, buf);
+	void* buf = kmalloc(FS_EXT2_SB_BLOCKSIZE(*sb));
+	drive->read(drive, (bt->groups[blkgrp].inode_table_addr + baddr) * FS_EXT2_SB_BLOCKSECTORS(*sb),
+			FS_EXT2_SB_BLOCKSECTORS(*sb), buf);
 	memcpy(buf + sb->inode_size * tind, _in, sb->inode_size);
-	drive->write(drive, bt->groups[blkgrp].inode_table_addr * FS_EXT2_SB_BLOCKSECTORS(*sb) + saddr,
-			1, buf);
+	drive->write(drive, (bt->groups[blkgrp].inode_table_addr + baddr) * FS_EXT2_SB_BLOCKSECTORS(*sb),
+			FS_EXT2_SB_BLOCKSECTORS(*sb), buf);
 
 	kfree(buf);
 }
@@ -501,9 +553,10 @@ typedef struct{
 	fs_ext2_blkgrp_table bt;
 } gfs_ext2_gdata;
 
-static int fs_ext2_create(file_system* fs, const char* path, int flags);
+static int fs_ext2_create(file_system* fs, const char* path, int type);
 
 
+// Initialization, conversion, etc. utils
 void fs_ext2_gfs_init(file_system* fs)
 {
 	fs->gdata = kmalloc(sizeof(gfs_ext2_gdata));
@@ -520,6 +573,38 @@ void fs_ext2_gfs_init(file_system* fs)
 	fs->create = &fs_ext2_create;
 }
 
+static int fs_ext2_type_fs2ext2_inode(int fs_type)
+{
+	switch(fs_type)
+	{
+		case FS_CREATE_TYPE_FILE:	return FS_EXT2_INODE_TYPE_FILE;
+		case FS_CREATE_TYPE_DIR:	return FS_EXT2_INODE_TYPE_DIR;
+		case FS_CREATE_TYPE_SYMLINK:	return FS_EXT2_INODE_TYPE_SYMLINK;
+		case FS_CREATE_TYPE_FIFO:	return FS_EXT2_INODE_TYPE_FIFO;
+		case FS_CREATE_TYPE_DEVCHAR:	return FS_EXT2_INODE_TYPE_CHARDEV;
+		case FS_CREATE_TYPE_DEVBLK:	return FS_EXT2_INODE_TYPE_BLKDEV;
+		case FS_CREATE_TYPE_UNIX_SOCK:	return FS_EXT2_INODE_TYPE_UNIXSOCK;
+	}
+	return 0;
+}
+static int fs_ext2_type_fs2ext2_typebyte(int fs_type)
+{
+	switch(fs_type)
+	{
+		case FS_CREATE_TYPE_FILE:	return 1;
+		case FS_CREATE_TYPE_DIR:	return 2;
+		case FS_CREATE_TYPE_SYMLINK:	return 7;
+		case FS_CREATE_TYPE_FIFO:	return 5;
+		case FS_CREATE_TYPE_DEVCHAR:	return 3;
+		case FS_CREATE_TYPE_DEVBLK:	return 4;
+		case FS_CREATE_TYPE_UNIX_SOCK:	return 6;
+	}
+	return 0;
+}
+
+
+
+// Real interface, including subfunctions:
 static int fs_ext2_find_final_inode(file_system* fs, const char* path,
 					fs_ext2_inode* _out, uint32_t* _num_out)
 {
@@ -563,8 +648,19 @@ static int fs_ext2_find_final_inode(file_system* fs, const char* path,
 	return 0;
 }
 
+#define SET_DIRENT_NAMELN(de_nameln, gdat, de)\
+{\
+	if((gdat).sb.req_features & FS_EXT2_SB_RWFEATURE_DIRS_HAVE_TYPE_FIELD){\
+		(de_nameln) = ((de_nameln) <= 255 ? (de_nameln) : 255);\
+		(de).name_length_lo = (uint8_t)(de_nameln);\
+	}\
+	else{\
+		(de).name_length_lo = (uint8_t)((de_nameln) & 0xFF);\
+		(de).name_length_hi = (uint8_t)(((de_nameln) >> 8) & 0xFF);\
+	}\
+}
 static int fs_ext2_occupy_vacant_dirent(file_system* fs, fs_ext2_inode* dir, uint32_t dir_num,
-					uint32_t de_inode, const char* de_name)
+					uint32_t de_inode, const char* de_name, int type)
 {
 	gfs_ext2_gdata* gdat = (gfs_ext2_gdata*)fs->gdata;
 
@@ -577,32 +673,31 @@ static int fs_ext2_occupy_vacant_dirent(file_system* fs, fs_ext2_inode* dir, uin
 		uint16_t nameln = it.cur.name_length_lo;
 		if(!(gdat->sb.req_features & FS_EXT2_SB_RWFEATURE_DIRS_HAVE_TYPE_FIELD))
 			nameln |= (uint16_t)it.cur.name_length_hi << (sizeof(it.cur.name_length_lo) * 8);
-		size_t gap = it.cur.entry_sz - nameln - DIRENT_SZ_WO_NAME;
 
-		if(gap >= DIRENT_SZ_WO_NAME + strlen(de_name) + 1)
+		uint16_t shrink_size = DIRENT_SZ_WO_NAME + nameln;
+		shrink_size += 4 - shrink_size % 4;
+		size_t gap = it.cur.entry_sz - shrink_size;
+
+		if(gap >= DIRENT_SZ_WO_NAME + strlen(de_name))
 		{ // found a fitting gap for a directory entry
 			// shrink the entry to minimal size
-			it.cur.entry_sz = nameln + DIRENT_SZ_WO_NAME;
+			it.cur.entry_sz = shrink_size;
 			memcpy(it.blkbuf + it.byteaddr, &it.cur, DIRENT_SZ_WO_NAME);
 			memcpy(it.blkbuf + it.byteaddr + DIRENT_SZ_WO_NAME, it.cur.name, nameln);
 
 			// form a directory entry
 			fs_ext2_dirent de_in;
-			uint16_t nameln = strlen(de_name);
 			de_in.inode_num = de_inode;
-			if(gdat->sb.req_features & FS_EXT2_SB_RWFEATURE_DIRS_HAVE_TYPE_FIELD){
-				nameln = (nameln <= 255 ? nameln : 255);
-				de_in.name_length_lo = (uint8_t)nameln;
-			}
-			else{
-				de_in.name_length_lo = (uint8_t)(nameln & 0xFF);
-				de_in.name_length_hi = (uint8_t)((nameln >> 8) & 0xFF);
-			}
+			de_in.type_byte = fs_ext2_type_fs2ext2_typebyte(type);
+
+			uint16_t de_nameln = strlen(de_name);
+			SET_DIRENT_NAMELN(de_nameln, *gdat, de_in);
+			de_in.entry_sz = gap;
 
 			// writing directory entry to block buffer
-			uint32_t de_addr = it.byteaddr + DIRENT_SZ_WO_NAME + nameln;
+			uint32_t de_addr = it.byteaddr + it.cur.entry_sz;
 			memcpy(it.blkbuf + de_addr, &de_in, DIRENT_SZ_WO_NAME);
-			memcpy(it.blkbuf + de_addr + DIRENT_SZ_WO_NAME, de_name, nameln);
+			memcpy(it.blkbuf + de_addr + DIRENT_SZ_WO_NAME, de_name, de_nameln);
 
 			// finally flushing changes to both entries to disk
 			fs_ext2_write_inode_data(fs->drive, &gdat->sb, dir, it.blki, it.blkbuf);
@@ -610,38 +705,73 @@ static int fs_ext2_occupy_vacant_dirent(file_system* fs, fs_ext2_inode* dir, uin
 		}
 	}
 	// no fitting gap was found, allocating and writing next block
-	uint32_t new_blk_grp = fs_ext2_get_inode_pointer(fs->drive, &gdat->sb, dir, it.blki, it_buf) / gdat->sb.blocks_per_group;
+	uint32_t new_blk_grp = fs_ext2_get_inode_pointer(fs->drive, &gdat->sb, dir, it.blki, it.blkbuf) / gdat->sb.blocks_per_group;
 	uint32_t new_blk = fs_ext2_find_unalloc_block(fs->drive, &gdat->sb, &gdat->bt,
 					new_blk_grp);
+	if(!new_blk)
+		return 0;
+
 	fs_ext2_write_inode_block_pointer(fs->drive, &gdat->sb, &gdat->bt, dir,
 						dir_num, it.blki, new_blk);
+	fs_ext2_dirent* first_de = (fs_ext2_dirent*)it_buf;
+	first_de->inode_num = de_inode;
+	first_de->type_byte = fs_ext2_type_fs2ext2_typebyte(type);
+
+	first_de->entry_sz = FS_EXT2_SB_BLOCKSIZE(gdat->sb);
+	uint16_t de_nameln = strlen(de_name);
+	SET_DIRENT_NAMELN(de_nameln, *gdat, *first_de);
 
 	kfree(it_buf);
-	return 0;
+	return 1;
 	#undef DIRENT_SZ_WO_NAME
 }
 
 
-static int fs_ext2_create(file_system* fs, const char* path, int flags)
+static int fs_ext2_create(file_system* fs, const char* path, int type)
 {
 	gfs_ext2_gdata* gdat = (gfs_ext2_gdata*)fs->gdata;
 
 	fs_ext2_inode fnode; uint32_t fnode_num;
 
 	char* path_buf = kmalloc(strlen(path) + 1);
+	const char* de_name;
 	strcpy(path_buf, path);
 	// intense wiretearing to get the file name out
-	char* i; for(i = path_buf + strlen(path); i >= path_buf; --i)
-		if(*i == '/') { *i = '\0'; break; }
+	char* i; for(i = path_buf + strlen(path); i >= path_buf; --i){
+		if(*i == '/'){
+			*i = '\0';
+			de_name = i+1;
+			break;
+		}
+	}
 	// if operating on root directory, just remove the whole thing, we are not UNIX
-	if(i < path_buf) path_buf[0] = '\0';
+	if(i < path_buf){
+		path_buf[0] = '\0';
+		de_name = path;
+	}
+
+	if(*de_name == '\0') // don't allow empty names
+		return FS_ERR_INVALID_FILENAME;
 
 	int err = fs_ext2_find_final_inode(fs, path_buf, &fnode, &fnode_num);
 	kfree(path_buf);
 	if(err)
 		return err;
 
-	fs_ext2_occupy_vacant_dirent(fs, &fnode, fnode_num, 13, "test");
+	uint32_t de_inode_num = fs_ext2_find_unalloc_inode(fs->drive, &gdat->sb, &gdat->bt,
+					(fnode_num - 1) / gdat->sb.inodes_per_group);
+	if(!de_inode_num)
+		return FS_ERR_NO_SPACE;
+	fs_ext2_inode de_inode;
+	memset(&de_inode, 0, sizeof(de_inode));
+	// TODO: assign more attributes like creation time
+	de_inode.type_perms = 33188; // for linux
+	de_inode.type_perms |= fs_ext2_type_fs2ext2_inode(type);
+	de_inode.hard_links = 1;
+
+	fs_ext2_write_inode(fs->drive, &gdat->sb, &gdat->bt, de_inode_num, &de_inode);
+	fs_ext2_mark_alloc_inode(fs->drive, &gdat->sb, &gdat->bt, de_inode_num);
+	fs_ext2_occupy_vacant_dirent(fs, &fnode, fnode_num, de_inode_num, de_name, type);
 
 	return 0;
 }

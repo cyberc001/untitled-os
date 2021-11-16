@@ -3,3 +3,5 @@ iso/boot/myos.bin
 *.o
 */*.o
 *.img
+*.swp
+*/*.swp

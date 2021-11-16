@@ -280,11 +280,24 @@ int fs_ext2_iterate_dir_next(ata_drive* drive, fs_ext2_sb* sb, fs_ext2_dir_itera
 uint32_t fs_ext2_find_grp_unalloc_block(ata_drive* drive, fs_ext2_sb* sb,
 						fs_ext2_blkgrp_table* bt, uint32_t blkgrp);
 /* Return value:
-*  address of an unallocated block (trying to find one within or ahead the specified group),
+*  address of an unallocated block (trying to find one within or ahead the specified group first),
 *  (uint32_t)-1 if no free block were found.
 *  Note: if no group is preferred, specify blkgrp_start as 0.
 */
 uint32_t fs_ext2_find_unalloc_block(ata_drive* drive, fs_ext2_sb* sb,
+						fs_ext2_blkgrp_table* bt, uint32_t blkgrp_start);
+
+/* Return value:
+*  inode number within the group,
+*  0 if no free inodes were found.
+*/
+uint32_t fs_ext2_find_grp_unalloc_inode(ata_drive* drive, fs_ext2_sb* sb,
+						fs_ext2_blkgrp_table* bt, uint32_t blkgrp);
+/* Return value:
+*  global inode number (trying to find one within or ahead of the specified group first),
+*  0 if no free inodes were found.
+*/
+uint32_t fs_ext2_find_unalloc_inode(ata_drive* drive, fs_ext2_sb* sb,
 						fs_ext2_blkgrp_table* bt, uint32_t blkgrp_start);
 
 

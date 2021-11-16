@@ -51,3 +51,14 @@ clean:
 run:
 	qemu-system-i386 -cdrom iso/boot/myos.iso\
 			 -drive id=disk,file=atest.img,if=ide,cache=none,format=raw \
+
+# test image manipulation
+img_refresh:
+	rm atest.img
+	cp ../atest.img .
+
+img_mount:
+	sudo mount -o loop atest.img ../mnt
+
+img_umount:
+	sudo umount ../mnt
