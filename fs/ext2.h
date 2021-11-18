@@ -176,6 +176,15 @@ typedef struct
 
 #define FS_EXT2_ROOT_INODE 2
 
+// Inode operations
+
+#define FS_EXT2_INODE_GET_SIZE(inode) ((uint64_t)(inode).size_lo | ((uint64_t)(inode).size_hi << 32))
+#define FS_EXT2_INODE_SET_SIZE(inode, size)\
+{\
+	(inode).size_lo = (size) & 0xFFFFFFFF;\
+	(inode).size_hi = ((uint64_t)(size) >> 32) & 0xFFFFFFFF;\
+}
+
 
 // inode flags
 // -- type and permissions
@@ -187,20 +196,26 @@ typedef struct
 #define FS_EXT2_INODE_TYPE_FILE		0x8000
 #define FS_EXT2_INODE_TYPE_SYMLINK	0xA000	// symbolic link
 #define FS_EXT2_INODE_TYPE_UNIXSOCK	0xC000	// UNIX socket
+
 // ---- permissions
 // (O - other, G - group, U - user, X - execute, W - write, R - read)
-#define FS_EXT2_INODE_PERM_OX		00001
-#define FS_EXT2_INODE_PERM_OW		00002
-#define FS_EXT2_INODE_PERM_OR		00004
-#define FS_EXT2_INODE_PERM_GX		00010
-#define FS_EXT2_INODE_PERM_GW		00020
-#define FS_EXT2_INODE_PERM_GR		00040
-#define FS_EXT2_INODE_PERM_UX		00100
-#define FS_EXT2_INODE_PERM_UW		00200
-#define FS_EXT2_INODE_PERM_UR		00400
-#define FS_EXT2_INODE_PERM_STICKY_BIT	01000
-#define FS_EXT2_INODE_PERM_SET_GID	02000
-#define FS_EXT2_INODE_PERM_SET_UID	04000
+#define FS_EXT2_INODE_PERM_OX		0x001
+#define FS_EXT2_INODE_PERM_OW		0x002
+#define FS_EXT2_INODE_PERM_OR		0x004
+#define FS_EXT2_INODE_PERM_GX		0x008
+#define FS_EXT2_INODE_PERM_GW		0x010
+#define FS_EXT2_INODE_PERM_GR		0x020
+#define FS_EXT2_INODE_PERM_UX		0x040
+#define FS_EXT2_INODE_PERM_UW		0x080
+#define FS_EXT2_INODE_PERM_UR		0x100
+#define FS_EXT2_INODE_PERM_STICKY_BIT	0x200
+#define FS_EXT2_INODE_PERM_SET_GID	0x400
+#define FS_EXT2_INODE_PERM_SET_UID	0x800
+
+#define FS_EXT2_INODE_PERM_EVERYTHING	(FS_EXT2_INODE_PERM_OX | FS_EXT2_INODE_PERM_OW | FS_EXT2_INODE_PERM_OR |\
+					 FS_EXT2_INODE_PERM_GX | FS_EXT2_INODE_PERM_GW | FS_EXT2_INODE_PERM_GR |\
+ 					 FS_EXT2_INODE_PERM_UX | FS_EXT2_INODE_PERM_UW | FS_EXT2_INODE_PERM_UR)
+
 // -- flags (flags field)
 #define FS_EXT2_INODE_SYNC			0x00008
 #define FS_EXT2_INODE_IMMUTABLE			0x00010 // content cannot be changed
@@ -310,7 +325,7 @@ void fs_ext2_write_sb(ata_drive* drive, fs_ext2_sb* sb);
 
 /* technically the whole sector where the index resides is updated,
 *  but it's not adviced to rely upon, especially if more complicated
-*  (esp. "lazy writing") policies will be involved.
+*  (esp. "lazy writing") policies will be involved in the future.
 */
 void fs_ext2_write_blkgrp_table_index(ata_drive* drive, fs_ext2_sb* sb,
 					fs_ext2_blkgrp_table* bt, uint32_t i);
@@ -329,9 +344,11 @@ void fs_ext2_write_inode(ata_drive* drive, fs_ext2_sb* sb, fs_ext2_blkgrp_table*
 				uint32_t inode_num, fs_ext2_inode* _in);
 
 /* writes out inode data if accessing any DBP.
-*  TODO: make this function allocate space for 0 SIBP/TIBP/DIBPs.
+*  Return value:
+*  0 if there was a failed attempt of allocating memory for a SIBP/TIBP/DIBP,
+*  1 otherwise (no attempt or successful allocation).
 */
-void fs_ext2_write_inode_block_pointer(ata_drive* drive, fs_ext2_sb* sb, fs_ext2_blkgrp_table* bt,
+int fs_ext2_write_inode_block_pointer(ata_drive* drive, fs_ext2_sb* sb, fs_ext2_blkgrp_table* bt,
 					fs_ext2_inode* inode, uint32_t inode_num, uint32_t bind, uint32_t ptr);
 /* Return value:
 *  0 if final address of the block in inode that is being written is zero,

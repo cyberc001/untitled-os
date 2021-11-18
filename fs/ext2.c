@@ -149,8 +149,7 @@ void fs_ext2_iterate_dir_start(ata_drive* drive, fs_ext2_sb* sb, fs_ext2_inode* 
 	it->byteaddr = 0;
 	it->blki = 0;
 	it->blkbuf = pbuf;
-	it->is_valid = 1;
-	fs_ext2_read_inode_data(drive, sb, inode, 0, pbuf);
+	it->is_valid = fs_ext2_read_inode_data(drive, sb, inode, 0, pbuf);
 }
 
 int fs_ext2_iterate_dir_next(ata_drive* drive, fs_ext2_sb* sb, fs_ext2_dir_iterator* it)
@@ -203,10 +202,10 @@ uint32_t fs_ext2_find_grp_unalloc_block(ata_drive* drive, fs_ext2_sb* sb,
 			uint8_t b = ((uint8_t*)buf)[bind];
 			if(b != 255){
 				uint8_t bsh = 0;
-				while(b & 1) { b >>= 1; bsh++; }
+				while(b & 0x80) { b <<= 1; bsh++; }
 
 				kfree(buf);
-				return (bind * 8 + (7 - bsh));
+				return (bind * 8 + bsh);
 			}
 		}
 	}
@@ -221,13 +220,15 @@ uint32_t fs_ext2_find_unalloc_block(ata_drive* drive, fs_ext2_sb* sb,
 	{
 		uint32_t ubi = fs_ext2_find_grp_unalloc_block(drive, sb, bt, bi);
 		if(ubi != (uint32_t)-1)
-			return bi * sb->blocks_per_group + ubi;
+			return bt->groups[bi].inode_table_addr + (sb->inodes_per_group * sb->inode_size / FS_EXT2_SB_BLOCKSIZE(*sb))
+				+ bi * sb->blocks_per_group + ubi;
 	}
 	for(uint32_t bi2 = 0; bi2 < bi; ++bi2)
 	{
 		uint32_t ubi = fs_ext2_find_grp_unalloc_block(drive, sb, bt, bi2);
 		if(ubi != (uint32_t)-1)
-			return bi * sb->blocks_per_group + ubi;
+			return bt->groups[bi].inode_table_addr + (sb->inodes_per_group * sb->inode_size / FS_EXT2_SB_BLOCKSIZE(*sb))
+				+ bi * sb->blocks_per_group + ubi;
 	}
 	return (uint32_t)-1;
 }
@@ -247,17 +248,21 @@ uint32_t fs_ext2_find_grp_unalloc_inode(ata_drive* drive, fs_ext2_sb* sb,
 				FS_EXT2_SB_BLOCKSECTORS(*sb), buf);
 		for(uint32_t bind = 0; bind < FS_EXT2_SB_BLOCKSIZE(*sb); ++bind)
 		{
-			// TODO make more advanced check for reserved inodes
 			if(blkgrp * sb->inodes_per_group + bind * 8 <= sb->first_unres_inode)
 				continue;
 
 			uint8_t b = ((uint8_t*)buf)[bind];
 			if(b != 255){
 				uint8_t bsh = 0;
-				while(b & 1) { b >>= 1; bsh++; }
+				while(b & 0x80 ||
+				blkgrp * sb->inodes_per_group + bind * 8 + bsh <= sb->first_unres_inode)
+				{
+					b <<= 1;
+					++bsh;
+				}
 
 				kfree(buf);
-				return (bind * 8 + (7 - bsh)) + 1;
+				return (bind * 8 + bsh) + 1;
 			}
 		}
 	}
@@ -340,8 +345,8 @@ void fs_ext2_mark_alloc_inode(ata_drive* drive, fs_ext2_sb* sb,
 void fs_ext2_mark_alloc_block(ata_drive* drive, fs_ext2_sb* sb,
 					fs_ext2_blkgrp_table* bt, uint32_t block_num)
 {
-	uint32_t blkgrp = (block_num - 1) / sb->blocks_per_group;
-	uint32_t tind = (block_num - 1) % sb->blocks_per_group; // index withing block group
+	uint32_t blkgrp = (block_num) / sb->blocks_per_group;
+	uint32_t tind = (block_num) % sb->blocks_per_group; // index withing block group
 
 	void* buf = kmalloc(ATA_SECTOR_SIZE);
 
@@ -412,7 +417,28 @@ void fs_ext2_write_inode(ata_drive* drive, fs_ext2_sb* sb, fs_ext2_blkgrp_table*
 	kfree(buf);
 }
 
-void fs_ext2_write_inode_block_pointer(ata_drive* drive, fs_ext2_sb* sb, fs_ext2_blkgrp_table* bt,
+
+#define TRY_ALLOC_IBP(ibp, buf)\
+{\
+	if(!(ibp)){\
+		uint32_t blkgrp_start = (inode_num - 1) / sb->inodes_per_group;\
+		(ibp) = fs_ext2_find_unalloc_block(drive, sb, bt, blkgrp_start);\
+		if(!(ibp)){\
+			kfree(buf);\
+			return 0;\
+		}\
+		fs_ext2_mark_alloc_block(drive, sb, bt, (ibp));\
+		\
+		memset(buf, 0, ATA_SECTOR_SIZE);\
+		((uint32_t*)buf)[sibp_addr * sizeof(uint32_t) % ATA_SECTOR_SIZE] = ptr;\
+		drive->write(drive, (ibp) * FS_EXT2_SB_BLOCKSECTORS(*sb)\
+				+ (sibp_addr * sizeof(uint32_t) / ATA_SECTOR_SIZE),\
+				ATA_SECTOR_SIZE, buf);\
+		return 1;\
+	}\
+}
+
+int fs_ext2_write_inode_block_pointer(ata_drive* drive, fs_ext2_sb* sb, fs_ext2_blkgrp_table* bt,
 					fs_ext2_inode* inode, uint32_t inode_num, uint32_t bind, uint32_t ptr)
 {
 	#define DBP_PER_BLOCK (FS_EXT2_SB_BLOCKSIZE(*sb) / sizeof(inode->dbp[0]))
@@ -423,7 +449,10 @@ void fs_ext2_write_inode_block_pointer(ata_drive* drive, fs_ext2_sb* sb, fs_ext2
 	}
 	else if(bind < 12 + DBP_PER_BLOCK){ // accessing a SIBP
 		uint32_t sibp_addr = bind - 12;
+
 		void* buf = kmalloc(ATA_SECTOR_SIZE);
+
+		TRY_ALLOC_IBP(inode->sibp, buf);
 
 		drive->read(drive, inode->sibp * FS_EXT2_SB_BLOCKSECTORS(*sb)
 				+ (sibp_addr * sizeof(uint32_t) / ATA_SECTOR_SIZE),
@@ -439,6 +468,8 @@ void fs_ext2_write_inode_block_pointer(ata_drive* drive, fs_ext2_sb* sb, fs_ext2
 		void* buf = kmalloc(ATA_SECTOR_SIZE);
 		uint32_t dibp_addr = (bind - 12 - DBP_PER_BLOCK) / DBP_PER_BLOCK; // address of SIBP block which contains the needed DBP
 		uint32_t sibp_addr = (bind - 12 - DBP_PER_BLOCK) % DBP_PER_BLOCK; // address of DBP inside the located SIBP
+
+		TRY_ALLOC_IBP(inode->dibp, buf);
 
 		drive->read(drive, inode->dibp * FS_EXT2_SB_BLOCKSECTORS(*sb),
 				FS_EXT2_SB_BLOCKSECTORS(*sb), buf); // read block DIBP is pointing to
@@ -460,6 +491,8 @@ void fs_ext2_write_inode_block_pointer(ata_drive* drive, fs_ext2_sb* sb, fs_ext2
 		uint32_t dibp_addr = (bind - 12 - DBP_PER_BLOCK - DBP_PER_BLOCK * DBP_PER_BLOCK) / DBP_PER_BLOCK; // address of SIBP block which contains the needed DBP
 		uint32_t sibp_addr = (bind - 12 - DBP_PER_BLOCK - DBP_PER_BLOCK * DBP_PER_BLOCK) % DBP_PER_BLOCK; // address of DBP inside the located SIBP
 
+		TRY_ALLOC_IBP(inode->tibp, buf);
+
 		drive->read(drive, inode->tibp * FS_EXT2_SB_BLOCKSECTORS(*sb),
 				FS_EXT2_SB_BLOCKSECTORS(*sb), buf); // read the block TIBP is pointing to
 		uint32_t baddr = ((uint32_t*)buf)[tibp_addr];
@@ -477,6 +510,7 @@ void fs_ext2_write_inode_block_pointer(ata_drive* drive, fs_ext2_sb* sb, fs_ext2
 
 		kfree(buf);
 	}
+	return 1;
 }
 
 int fs_ext2_write_inode_data(ata_drive* drive, fs_ext2_sb* sb, fs_ext2_inode* inode,
@@ -704,15 +738,23 @@ static int fs_ext2_occupy_vacant_dirent(file_system* fs, fs_ext2_inode* dir, uin
 			return 1;
 		}
 	}
-	// no fitting gap was found, allocating and writing next block
+	// no fitting gap was found, allocating and writing a new block
 	uint32_t new_blk_grp = fs_ext2_get_inode_pointer(fs->drive, &gdat->sb, dir, it.blki, it.blkbuf) / gdat->sb.blocks_per_group;
 	uint32_t new_blk = fs_ext2_find_unalloc_block(fs->drive, &gdat->sb, &gdat->bt,
 					new_blk_grp);
 	if(!new_blk)
 		return 0;
 
+	fs_ext2_mark_alloc_block(fs->drive, &gdat->sb, &gdat->bt, new_blk);
+	// TODO: optimise to avoid 2 writes to disk
 	fs_ext2_write_inode_block_pointer(fs->drive, &gdat->sb, &gdat->bt, dir,
 						dir_num, it.blki, new_blk);
+
+	// setting parent directory size to 1 block
+	FS_EXT2_INODE_SET_SIZE(*dir, FS_EXT2_INODE_GET_SIZE(*dir) + FS_EXT2_SB_BLOCKSIZE(gdat->sb));
+	fs_ext2_write_inode(fs->drive, &gdat->sb, &gdat->bt, dir_num, dir);
+
+	// operating on first bytes of the buffer as fs_ext2_dirent
 	fs_ext2_dirent* first_de = (fs_ext2_dirent*)it_buf;
 	first_de->inode_num = de_inode;
 	first_de->type_byte = fs_ext2_type_fs2ext2_typebyte(type);
@@ -720,6 +762,11 @@ static int fs_ext2_occupy_vacant_dirent(file_system* fs, fs_ext2_inode* dir, uin
 	first_de->entry_sz = FS_EXT2_SB_BLOCKSIZE(gdat->sb);
 	uint16_t de_nameln = strlen(de_name);
 	SET_DIRENT_NAMELN(de_nameln, *gdat, *first_de);
+
+	memcpy(it_buf + DIRENT_SZ_WO_NAME, de_name, strlen(de_name));
+
+	// writing changes on the buffer
+	fs_ext2_write_inode_data(fs->drive, &gdat->sb, dir, it.blki, it_buf);
 
 	kfree(it_buf);
 	return 1;
@@ -731,6 +778,7 @@ static int fs_ext2_create(file_system* fs, const char* path, int type)
 {
 	gfs_ext2_gdata* gdat = (gfs_ext2_gdata*)fs->gdata;
 
+	// directory that will store the new file
 	fs_ext2_inode fnode; uint32_t fnode_num;
 
 	char* path_buf = kmalloc(strlen(path) + 1);
@@ -762,16 +810,44 @@ static int fs_ext2_create(file_system* fs, const char* path, int type)
 					(fnode_num - 1) / gdat->sb.inodes_per_group);
 	if(!de_inode_num)
 		return FS_ERR_NO_SPACE;
+
 	fs_ext2_inode de_inode;
 	memset(&de_inode, 0, sizeof(de_inode));
 	// TODO: assign more attributes like creation time
-	de_inode.type_perms = 33188; // for linux
+	de_inode.type_perms = FS_EXT2_INODE_PERM_EVERYTHING; // not used here, but for UNIX systems that pay attention to permissions
 	de_inode.type_perms |= fs_ext2_type_fs2ext2_inode(type);
-	de_inode.hard_links = 1;
+	switch(type)
+	{
+		case FS_CREATE_TYPE_DIR:
+			de_inode.hard_links = 2;
+			de_inode.sector_cnt = FS_EXT2_SB_BLOCKSECTORS(gdat->sb);
+			break;
+		default:
+			de_inode.hard_links = 1;
+			break;
+	}
 
-	fs_ext2_write_inode(fs->drive, &gdat->sb, &gdat->bt, de_inode_num, &de_inode);
+	// write inode and directory entry
 	fs_ext2_mark_alloc_inode(fs->drive, &gdat->sb, &gdat->bt, de_inode_num);
-	fs_ext2_occupy_vacant_dirent(fs, &fnode, fnode_num, de_inode_num, de_name, type);
+	fs_ext2_write_inode(fs->drive, &gdat->sb, &gdat->bt, de_inode_num, &de_inode);
+	if(!fs_ext2_occupy_vacant_dirent(fs, &fnode, fnode_num,
+						de_inode_num, de_name, type))
+		return FS_ERR_NO_SPACE;
+
+	// modify parent directory's hard link count
+	fnode.hard_links++;
+	fs_ext2_write_inode(fs->drive, &gdat->sb, &gdat->bt, fnode_num, &fnode);
+
+	// if creating directory, add "." and ".." directories into it
+	if(type == FS_CREATE_TYPE_DIR)
+	{
+		if(!fs_ext2_occupy_vacant_dirent(fs, &de_inode, de_inode_num,
+							de_inode_num, ".", type))
+			return FS_ERR_NO_SPACE;
+		if(!fs_ext2_occupy_vacant_dirent(fs, &de_inode, de_inode_num,
+							de_inode_num, "..", type))
+			return FS_ERR_NO_SPACE;
+	}
 
 	return 0;
 }

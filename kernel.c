@@ -21,10 +21,9 @@ void kernel_main(void)
 	_fs.drive = &drives[0];
 	fs_ext2_gfs_init(&_fs);
 
-	// TODO: create proper directories
 	bios_vga_printf("create return code: %d\n", _fs.create(&_fs, "test", FS_CREATE_TYPE_DIR));
 
-	/*fs_ext2_sb sb;
+	fs_ext2_sb sb;
 	fs_ext2_read_sb(&drives[0], &sb);
 	bios_vga_printf("ext2 signature: 0x%X\n", (unsigned)sb.ext2_sig);
 
@@ -40,13 +39,8 @@ void kernel_main(void)
 	fs_ext2_iterate_dir_start(&drives[0], &sb, &ie1, &ie1_it, ie1_buf);
 	while(fs_ext2_iterate_dir_next(&drives[0], &sb, &ie1_it))
 	{
-		bios_vga_printf("%d %d %s\n", ie1_it.cur.name_length_lo, ie1_it.cur.entry_sz, ie1_it.cur.name);
+		bios_vga_printf("%d %d %lu %s\n", ie1_it.cur.name_length_lo, ie1_it.cur.entry_sz, ie1_it.cur.inode_num, ie1_it.cur.name);
 	}
-
-	fs_ext2_read_inode(&drives[0], &sb, &bgrp_table, 13, &ie1);
-	bios_vga_printf("%u\n", ie1.type_perms);
-	fs_ext2_read_inode(&drives[0], &sb, &bgrp_table, 24, &ie1);
-	bios_vga_printf("%u\n", ie1.hard_links);*/
 
 	/*
 	// test file read
@@ -58,3 +52,4 @@ void kernel_main(void)
 	fs_ext2_read_inode_data(&drives[0], &sb, &ie1, i, ie1_buf);
 	for(size_t j = 0; j < FS_EXT2_INODE_SIZE(ie1) % FS_EXT2_SB_BLOCKSIZE(sb); ++j) bios_vga_putchar(((char*)ie1_buf)[j]);*/
 }
+
