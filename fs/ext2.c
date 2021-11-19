@@ -588,6 +588,7 @@ typedef struct{
 } gfs_ext2_gdata;
 
 static int fs_ext2_create(file_system* fs, const char* path, int type);
+static int fs_ext2_unlink(file_system* fs, const char* path);
 
 
 // Initialization, conversion, etc. utils
@@ -605,6 +606,7 @@ void fs_ext2_gfs_init(file_system* fs)
 	/*fs->fd_size*/
 
 	fs->create = &fs_ext2_create;
+	fs->unlink = &fs_ext2_unlink;
 }
 
 static int fs_ext2_type_fs2ext2_inode(int fs_type)
@@ -637,8 +639,10 @@ static int fs_ext2_type_fs2ext2_typebyte(int fs_type)
 }
 
 
+// --------------------------------------
+// Real interface, including subfunctions
+// --------------------------------------
 
-// Real interface, including subfunctions:
 static int fs_ext2_find_final_inode(file_system* fs, const char* path,
 					fs_ext2_inode* _out, uint32_t* _num_out)
 {
@@ -675,8 +679,9 @@ static int fs_ext2_find_final_inode(file_system* fs, const char* path,
 
 	// make sure to read root directory if it's the sole filesystem object in the path
 	if(cur_inode_num == FS_EXT2_ROOT_INODE)
-		fs_ext2_read_inode(fs->drive, &gdat->sb, &gdat->bt, cur_inode_num, &cur_dir);
-	*_out = cur_dir;
+		fs_ext2_read_inode(fs->drive, &gdat->sb, &gdat->bt, cur_inode_num, _out);
+	else // else read the file inode number that was found above is pointing to
+		fs_ext2_read_inode(fs->drive, &gdat->sb, &gdat->bt, cur_inode_num, _out);
 	*_num_out = cur_inode_num;
 	kfree(it_buf); kfree(path_buf);
 	return 0;
@@ -704,6 +709,25 @@ static int fs_ext2_occupy_vacant_dirent(file_system* fs, fs_ext2_inode* dir, uin
 	fs_ext2_iterate_dir_start(fs->drive, &gdat->sb, dir, &it, it_buf);
 	while(fs_ext2_iterate_dir_next(fs->drive, &gdat->sb, &it))
 	{
+		if(it.cur.inode_num == 0 && it.cur.entry_sz >= DIRENT_SZ_WO_NAME + strlen(de_name))
+		{ // found an invalid (inode number 0) and big enough direntry, which marks free space
+			// form a directory entry
+			it.cur.inode_num = de_inode;
+			it.cur.type_byte = fs_ext2_type_fs2ext2_typebyte(type);
+
+			uint16_t de_nameln = strlen(de_name);
+			SET_DIRENT_NAMELN(de_nameln, *gdat, it.cur);
+
+			// writing directory entry to block buffer
+			memcpy(it.blkbuf + it.byteaddr - it.cur.entry_sz, &it.cur, DIRENT_SZ_WO_NAME);
+			memcpy(it.blkbuf + it.byteaddr + DIRENT_SZ_WO_NAME - it.cur.entry_sz, de_name, de_nameln);
+
+			// finally flushing changes to both entries to disk
+			fs_ext2_write_inode_data(fs->drive, &gdat->sb, dir, it.blki, it.blkbuf);
+			kfree(it_buf);
+			return 1;
+		}
+
 		uint16_t nameln = it.cur.name_length_lo;
 		if(!(gdat->sb.req_features & FS_EXT2_SB_RWFEATURE_DIRS_HAVE_TYPE_FIELD))
 			nameln |= (uint16_t)it.cur.name_length_hi << (sizeof(it.cur.name_length_lo) * 8);
@@ -715,9 +739,16 @@ static int fs_ext2_occupy_vacant_dirent(file_system* fs, fs_ext2_inode* dir, uin
 		if(gap >= DIRENT_SZ_WO_NAME + strlen(de_name))
 		{ // found a fitting gap for a directory entry
 			// shrink the entry to minimal size
+			uint16_t it_prevesz = it.cur.entry_sz;
 			it.cur.entry_sz = shrink_size;
-			memcpy(it.blkbuf + it.byteaddr, &it.cur, DIRENT_SZ_WO_NAME);
-			memcpy(it.blkbuf + it.byteaddr + DIRENT_SZ_WO_NAME, it.cur.name, nameln);
+
+			uint32_t de_addr;
+			if(it.byteaddr < it_prevesz)
+				de_addr = it.byteaddr;
+			else
+				de_addr = it.byteaddr - it_prevesz;
+			memcpy(it.blkbuf + de_addr, &it.cur, DIRENT_SZ_WO_NAME);
+			memcpy(it.blkbuf + de_addr + DIRENT_SZ_WO_NAME, it.cur.name, nameln);
 
 			// form a directory entry
 			fs_ext2_dirent de_in;
@@ -729,12 +760,13 @@ static int fs_ext2_occupy_vacant_dirent(file_system* fs, fs_ext2_inode* dir, uin
 			de_in.entry_sz = gap;
 
 			// writing directory entry to block buffer
-			uint32_t de_addr = it.byteaddr + it.cur.entry_sz;
+			de_addr += it.cur.entry_sz;
 			memcpy(it.blkbuf + de_addr, &de_in, DIRENT_SZ_WO_NAME);
 			memcpy(it.blkbuf + de_addr + DIRENT_SZ_WO_NAME, de_name, de_nameln);
 
 			// finally flushing changes to both entries to disk
 			fs_ext2_write_inode_data(fs->drive, &gdat->sb, dir, it.blki, it.blkbuf);
+			kfree(it_buf);
 			return 1;
 		}
 	}
@@ -766,14 +798,34 @@ static int fs_ext2_occupy_vacant_dirent(file_system* fs, fs_ext2_inode* dir, uin
 	memcpy(it_buf + DIRENT_SZ_WO_NAME, de_name, strlen(de_name));
 
 	// writing changes on the buffer
-	fs_ext2_write_inode_data(fs->drive, &gdat->sb, dir, it.blki, it_buf);
+	fs_ext2_write_inode_data(fs->drive, &gdat->sb, dir, it.blki, it.blkbuf);
 
 	kfree(it_buf);
 	return 1;
 	#undef DIRENT_SZ_WO_NAME
 }
 
+static void fs_ext2_sep_fname_and_dir(const char* path, char* path_buf, const char** name_out)
+{
+	strcpy(path_buf, path);
+	// tearing the file name out (last token separating by '/')
+	char* i; for(i = path_buf + strlen(path); i >= path_buf; --i){
+		if(*i == '/'){
+			*i = '\0';
+			*name_out = i+1;
+			break;
+		}
+	}
+	// if operating on root directory, just remove the whole thing, we are not UNIX
+	if(i < path_buf){
+		path_buf[0] = '\0';
+		*name_out = path;
+	}
+}
 
+// ++++++++
+// create()
+// ++++++++
 static int fs_ext2_create(file_system* fs, const char* path, int type)
 {
 	gfs_ext2_gdata* gdat = (gfs_ext2_gdata*)fs->gdata;
@@ -783,22 +835,9 @@ static int fs_ext2_create(file_system* fs, const char* path, int type)
 
 	char* path_buf = kmalloc(strlen(path) + 1);
 	const char* de_name;
-	strcpy(path_buf, path);
-	// intense wiretearing to get the file name out
-	char* i; for(i = path_buf + strlen(path); i >= path_buf; --i){
-		if(*i == '/'){
-			*i = '\0';
-			de_name = i+1;
-			break;
-		}
-	}
-	// if operating on root directory, just remove the whole thing, we are not UNIX
-	if(i < path_buf){
-		path_buf[0] = '\0';
-		de_name = path;
-	}
-
-	if(*de_name == '\0') // don't allow empty names
+	fs_ext2_sep_fname_and_dir(path, path_buf, &de_name);
+	// don't allow empty names
+	if(*de_name == '\0')
 		return FS_ERR_INVALID_FILENAME;
 
 	int err = fs_ext2_find_final_inode(fs, path_buf, &fnode, &fnode_num);
@@ -848,6 +887,129 @@ static int fs_ext2_create(file_system* fs, const char* path, int type)
 							de_inode_num, "..", type))
 			return FS_ERR_NO_SPACE;
 	}
+
+	return 0;
+}
+
+
+static void fs_ext2_remove_dirent(file_system* fs, fs_ext2_inode* dir, uint32_t dir_num,
+						uint32_t de_inode)
+{
+	gfs_ext2_gdata* gdat = (gfs_ext2_gdata*)fs->gdata;
+
+	fs_ext2_dir_iterator it, it_prev;
+	#define DIRENT_SZ_WO_NAME (sizeof(it.cur) - sizeof(it.cur.name))
+	it_prev.is_valid = 0;
+	void* it_buf = kmalloc(FS_EXT2_SB_BLOCKSIZE(gdat->sb));
+	fs_ext2_iterate_dir_start(fs->drive, &gdat->sb, dir, &it, it_buf);
+
+	while(fs_ext2_iterate_dir_next(fs->drive, &gdat->sb, &it))
+	{
+		if(it.cur.inode_num == de_inode)
+		{
+			if(it_prev.is_valid && it_prev.blki == it.blki)
+			{ // if previous direntry exists and was in the same block, extend it to fill in the gap
+				uint16_t prev_esz = it_prev.cur.entry_sz;
+				it_prev.cur.entry_sz += it.cur.entry_sz;
+				memcpy(it_prev.blkbuf + it_prev.byteaddr - prev_esz, &it_prev.cur, DIRENT_SZ_WO_NAME);
+				fs_ext2_write_inode_data(fs->drive, &gdat->sb, dir, it_prev.blki, it_prev.blkbuf);
+
+				// since currenty direntry was joined with previous, previous directory should stay the same
+				continue;
+			}
+			else
+			{ // mark the direntry as an empty space
+				it.cur.inode_num = 0;
+				memcpy(it.blkbuf + it.byteaddr - it.cur.entry_sz, &it.cur, DIRENT_SZ_WO_NAME);
+				fs_ext2_write_inode_data(fs->drive, &gdat->sb, dir, it.blki, it.blkbuf);
+
+				void* tbuf = kmalloc(FS_EXT2_SB_BLOCKSIZE(gdat->sb));
+				if(it.cur.entry_sz == FS_EXT2_SB_BLOCKSIZE(gdat->sb)
+				&& !fs_ext2_get_inode_pointer(fs->drive, &gdat->sb, dir, it.blki+1, tbuf))
+				{ // an empty direntry spans accross the whole block, meaning it can be safely freed if it's the last of pointers
+					fs_ext2_mark_unalloc_block(fs->drive, &gdat->sb, &gdat->bt,
+						fs_ext2_get_inode_pointer(fs->drive, &gdat->sb, dir, it.blki, tbuf));
+					fs_ext2_write_inode_block_pointer(fs->drive, &gdat->sb, &gdat->bt,
+										dir, dir_num, it.blki, 0);
+				}
+				kfree(tbuf);
+			}
+			/* search continues to make sure duplicate entries are removed as well
+			 * (in case of hard links to file in the same directories)
+			 */
+		}
+		it_prev = it;
+	}
+
+	kfree(it_buf);
+	#undef DIRENT_SZ_WO_NAME
+}
+
+static void fs_ext2_free_file(file_system* fs, fs_ext2_inode* file, uint32_t file_num)
+{
+	gfs_ext2_gdata* gdat = (gfs_ext2_gdata*)fs->gdata;
+	void* it_buf = kmalloc(FS_EXT2_SB_BLOCKSIZE(gdat->sb));
+
+	// mark all dedicated blocks as free
+	uint32_t ptr;
+	for(uint32_t blki = 0;
+		(ptr = fs_ext2_get_inode_pointer(fs->drive, &gdat->sb, file, blki, it_buf));
+		++blki)
+	{
+		bios_vga_printf("deleted block %lu\n", ptr);
+		fs_ext2_mark_unalloc_block(fs->drive, &gdat->sb, &gdat->bt, ptr);
+	}
+
+	// mark file inode as free
+	fs_ext2_mark_unalloc_inode(fs->drive, &gdat->sb, &gdat->bt, file_num);
+
+	kfree(it_buf);
+}
+
+
+// ++++++++
+// unlink()
+// ++++++++
+static int fs_ext2_unlink(file_system* fs, const char* path)
+{
+	gfs_ext2_gdata* gdat = (gfs_ext2_gdata*)fs->gdata;
+
+	// Finding file inode to unlink
+	fs_ext2_inode fnode; uint32_t fnode_num;
+	int err = fs_ext2_find_final_inode(fs, path, &fnode, &fnode_num);
+	if(err)
+		return err;
+
+	// Finding directory to unlink the file from
+	char* path_buf = kmalloc(strlen(path) + 1);
+	const char* dir_name;
+	fs_ext2_sep_fname_and_dir(path, path_buf, &dir_name);
+
+	fs_ext2_inode dirnode; uint32_t dirnode_num;
+	err = fs_ext2_find_final_inode(fs, path_buf, &dirnode, &dirnode_num);
+	kfree(path_buf);
+	if(err)
+		return err;
+
+	// remove directory entry of the file from directory
+	fs_ext2_remove_dirent(fs, &dirnode, dirnode_num, fnode_num);
+
+	// decrement hardlink count of the directory
+	dirnode.hard_links--;
+	/* Note: it is assumed that until directory is directly unlinked from it's parent directory,
+	*  it's hard links count stays at or above 1.
+	*/
+	fs_ext2_write_inode(fs->drive, &gdat->sb, &gdat->bt, dirnode_num, &dirnode);
+
+	// decrement hardlink count of the file
+	fnode.hard_links--;
+	if(!fnode.hard_links
+	|| ((fnode.type_perms & FS_EXT2_INODE_TYPE_DIR) && fnode.hard_links == 1) )
+	{ // if there is no more duplicate hard links (or it's an empty directory), free the file and all it's blocks
+		fs_ext2_free_file(fs, &fnode, fnode_num);
+	}
+	else
+		fs_ext2_write_inode(fs->drive, &gdat->sb, &gdat->bt, fnode_num, &fnode);
 
 	return 0;
 }
