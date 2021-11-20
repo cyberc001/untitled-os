@@ -12,8 +12,10 @@ char* fs_next_file(char** cur)
 
 	for(; **cur != '/' && **cur != '\0'; ++(*cur))
 		;
+	int was_null = **cur == '\0';
 	**cur = '\0';
-	++(*cur);
+	if(!was_null)
+		++(*cur);
 
 	return ret;
 }

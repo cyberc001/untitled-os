@@ -587,8 +587,23 @@ typedef struct{
 	fs_ext2_blkgrp_table bt;
 } gfs_ext2_gdata;
 
+typedef struct{
+	// general info
+	fs_ext2_inode inode;
+	uint32_t inode_num;
+
+	// read/write pointer
+	struct{
+		uint32_t blki;		// current block pointer index
+		uint32_t byteaddr;	// current byte address withing current block
+		uint8_t is_blk_valid;	// if 0, then current block is not allocated
+	} ptr;
+} gfs_ext2_fd;
+
 static int fs_ext2_create(file_system* fs, const char* path, int type);
 static int fs_ext2_unlink(file_system* fs, const char* path);
+static int fs_ext2_rename(file_system* fs, const char* old, const char* _new);
+static int fs_ext2_open(file_system* fs, void* fd, const char* path, int flags);
 
 
 // Initialization, conversion, etc. utils
@@ -603,13 +618,15 @@ void fs_ext2_gfs_init(file_system* fs)
 			FS_EXT2_SB_BLOCKGROUPS_TOTAL(gdat->sb)};
 	fs_ext2_read_blkgrp_table(fs->drive, &gdat->sb, &gdat->bt);
 
-	/*fs->fd_size*/
+	fs->fd_size = sizeof(gfs_ext2_fd);
 
 	fs->create = &fs_ext2_create;
 	fs->unlink = &fs_ext2_unlink;
+	fs->rename = &fs_ext2_rename;
+	fs->open = &fs_ext2_open;
 }
 
-static int fs_ext2_type_fs2ext2_inode(int fs_type)
+static inline int fs_ext2_type_fs2ext2_inode(int fs_type)
 {
 	switch(fs_type)
 	{
@@ -623,7 +640,7 @@ static int fs_ext2_type_fs2ext2_inode(int fs_type)
 	}
 	return 0;
 }
-static int fs_ext2_type_fs2ext2_typebyte(int fs_type)
+static inline int fs_ext2_type_fs2ext2_typebyte(int fs_type)
 {
 	switch(fs_type)
 	{
@@ -635,6 +652,18 @@ static int fs_ext2_type_fs2ext2_typebyte(int fs_type)
 		case FS_CREATE_TYPE_DEVBLK:	return 4;
 		case FS_CREATE_TYPE_UNIX_SOCK:	return 6;
 	}
+	return 0;
+}
+
+static inline int fs_ext2_type_ext22fs_inode(uint16_t type_perms)
+{
+	if(type_perms & FS_EXT2_INODE_TYPE_FILE)	return FS_CREATE_TYPE_FILE;
+	if(type_perms & FS_EXT2_INODE_TYPE_DIR)		return FS_CREATE_TYPE_DIR;
+	if(type_perms & FS_EXT2_INODE_TYPE_SYMLINK)	return FS_CREATE_TYPE_SYMLINK;
+	if(type_perms & FS_EXT2_INODE_TYPE_FIFO)	return FS_CREATE_TYPE_FIFO;
+	if(type_perms & FS_EXT2_INODE_TYPE_CHARDEV)	return FS_CREATE_TYPE_DEVCHAR;
+	if(type_perms & FS_EXT2_INODE_TYPE_BLKDEV)	return FS_CREATE_TYPE_DEVBLK;
+	if(type_perms & FS_EXT2_INODE_TYPE_UNIXSOCK)	return FS_CREATE_TYPE_UNIX_SOCK;
 	return 0;
 }
 
@@ -956,7 +985,6 @@ static void fs_ext2_free_file(file_system* fs, fs_ext2_inode* file, uint32_t fil
 		(ptr = fs_ext2_get_inode_pointer(fs->drive, &gdat->sb, file, blki, it_buf));
 		++blki)
 	{
-		bios_vga_printf("deleted block %lu\n", ptr);
 		fs_ext2_mark_unalloc_block(fs->drive, &gdat->sb, &gdat->bt, ptr);
 	}
 
@@ -1011,5 +1039,120 @@ static int fs_ext2_unlink(file_system* fs, const char* path)
 	else
 		fs_ext2_write_inode(fs->drive, &gdat->sb, &gdat->bt, fnode_num, &fnode);
 
+	return 0;
+}
+
+// ++++++++
+// rename()
+// ++++++++
+static int fs_ext2_rename(file_system* fs, const char* old, const char* _new)
+{
+	// finding old and new directories for the file
+	char* old_buf = kmalloc(strlen(old) + 1);
+	char* new_buf = kmalloc(strlen(_new) + 1);
+	const char* new_fname;
+	fs_ext2_sep_fname_and_dir(old, old_buf, &new_fname);
+	fs_ext2_sep_fname_and_dir(_new, new_buf, &new_fname);
+
+	fs_ext2_inode old_dir_node, new_dir_node;
+	uint32_t old_dir_num, new_dir_num;
+	int err = fs_ext2_find_final_inode(fs, old_buf, &old_dir_node, &old_dir_num);
+	kfree(old_buf);
+	if(err){
+		kfree(new_buf);
+		return err;
+	}
+	err = fs_ext2_find_final_inode(fs, new_buf, &new_dir_node, &new_dir_num);
+	if(err){
+		kfree(new_buf);
+		return err;
+	}
+
+	// finding the file itself
+	fs_ext2_inode fnode; uint32_t fnode_num;
+	err = fs_ext2_find_final_inode(fs, old, &fnode, &fnode_num);
+	if(err){
+		kfree(new_buf);
+		return err;
+	}
+
+	// removing old directory entry and inserting the new one
+	fs_ext2_remove_dirent(fs, &old_dir_node, old_dir_num, fnode_num);
+	if(!fs_ext2_occupy_vacant_dirent(fs, &new_dir_node, new_dir_num,
+				fnode_num, new_fname, fs_ext2_type_ext22fs_inode(fnode.type_perms))){
+		kfree(new_buf);
+		return FS_ERR_NO_SPACE;
+	}
+
+	kfree(new_buf);
+	return 0;
+}
+
+// ++++++
+// open()
+// ++++++
+static int fs_ext2_open(file_system* fs, void* fd, const char* path, int flags)
+{
+	gfs_ext2_gdata* gdat = (gfs_ext2_gdata*)fs->gdata;
+	gfs_ext2_fd* _fd = (gfs_ext2_fd*)fd;
+
+	int err = fs_ext2_find_final_inode(fs, path, &_fd->inode, &_fd->inode_num);
+	if(err){
+		if(err == FS_ERR_DOESNT_EXIST
+		&& (flags & FS_OPEN_CREATE) && (flags & FS_OPEN_WRITE))
+		{
+			err = fs_ext2_create(fs, path, FS_CREATE_TYPE_FILE);
+			if(err)
+				return err;
+			err = fs_ext2_find_final_inode(fs, path, &_fd->inode, &_fd->inode_num);
+			if(err)
+				return err;
+		}
+		else
+			return err;
+	}
+
+	void* blk_buf = kmalloc(FS_EXT2_SB_BLOCKSIZE(gdat->sb));
+
+	if( (flags & FS_OPEN_RECREATE) && (flags & FS_OPEN_WRITE) )
+	{
+		// mark all dedicated blocks as free, and set corresponding pointers to zero
+		uint32_t ptr;
+		for(uint32_t blki = 0;
+			(ptr = fs_ext2_get_inode_pointer(fs->drive, &gdat->sb, &_fd->inode, blki, blk_buf));
+			++blki)
+		{
+			fs_ext2_write_inode_block_pointer(fs->drive, &gdat->sb, &gdat->bt,
+								&_fd->inode, _fd->inode_num, blki, 0);
+			fs_ext2_mark_unalloc_block(fs->drive, &gdat->sb, &gdat->bt, ptr);
+		}
+		FS_EXT2_INODE_SET_SIZE(_fd->inode, 0);
+		fs_ext2_write_inode(fs->drive, &gdat->sb, &gdat->bt, _fd->inode_num, &_fd->inode);
+	}
+
+	_fd->ptr.is_blk_valid = 1;
+	if(flags & FS_OPEN_ENDPTR){
+		uint32_t blki; for(blki = 0;
+			(fs_ext2_get_inode_pointer(fs->drive, &gdat->sb, &_fd->inode, blki, blk_buf));
+			++blki)
+			;
+		if(blki)
+			--blki;
+		else
+			_fd->ptr.is_blk_valid = 0;
+
+		_fd->ptr.blki = blki;
+		_fd->ptr.byteaddr = FS_EXT2_INODE_GET_SIZE(_fd->inode) % FS_EXT2_SB_BLOCKSIZE(gdat->sb);
+		if(_fd->ptr.byteaddr == 0)
+			_fd->ptr.is_blk_valid = 0; // pointing to the last, non-allocated block pointer
+	}
+	else{
+		_fd->ptr.blki = 0;
+		_fd->ptr.byteaddr = 0;
+		if(!fs_ext2_get_inode_pointer(fs->drive, &gdat->sb, &_fd->inode, 0, blk_buf))
+			_fd->ptr.is_blk_valid = 0;
+	}
+
+	kfree(blk_buf);
 	return 0;
 }

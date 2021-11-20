@@ -21,9 +21,12 @@ void kernel_main(void)
 	_fs.drive = &drives[0];
 	fs_ext2_gfs_init(&_fs);
 
-	bios_vga_printf("create return code: %d\n", _fs.create(&_fs, "test", FS_CREATE_TYPE_DIR));
+	//bios_vga_printf("create return code: %d\n", _fs.create(&_fs, "test", FS_CREATE_TYPE_DIR));
 	//bios_vga_printf("create return code: %d\n", _fs.create(&_fs, "test", FS_CREATE_TYPE_FILE));
-	bios_vga_printf("unlink return code: %d\n", _fs.unlink(&_fs, "test"));
+	//bios_vga_printf("unlink return code: %d\n", _fs.unlink(&_fs, "test"));
+	//bios_vga_printf("rename return code: %d\n", _fs.rename(&_fs, "readme", "do_not_read_me"));
+	void* fd = kmalloc(_fs.fd_size);
+	bios_vga_printf("open return code: %d\n", _fs.open(&_fs, fd, "readme", FS_OPEN_WRITE | FS_OPEN_RECREATE));
 
 	fs_ext2_sb sb;
 	fs_ext2_read_sb(&drives[0], &sb);
