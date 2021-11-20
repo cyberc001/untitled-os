@@ -33,6 +33,7 @@ typedef struct _file_system
 	*
 	*  - read() and write() return 0 on error or zero length reads/writes, and
 	*    amount of read/written bytes otherwise.
+	*    These operations also automatically seek past read/written data chunks.
 	*/
 
 	int (*create)(struct _file_system* fs, const char* path, int type);
@@ -42,7 +43,7 @@ typedef struct _file_system
 	int (*open)(struct _file_system* fs, void* fd, const char* path, int flags);
 	void (*close)(struct _file_system* fs, void* fd);
 
-	long (*lseek)(struct _file_system* fs, void* fd, long offset, int whence);
+	long (*seek)(struct _file_system* fs, void* fd, long offset, int whence);
 	size_t (*read)(struct _file_system* fs, void* fd, void* buf, size_t count);
 	size_t (*write)(struct _file_system* fs, void* fd, const void* buf, size_t count);
 } file_system;
@@ -69,6 +70,10 @@ typedef struct _file_system
 #define FS_OPEN_RECREATE	0x08	// In conjunction with FS_OPEN_WRITE removes all contents
 					// of the file written before opening it if it exists.
 #define FS_OPEN_ENDPTR		0x10	// Set pointer to the end of file (ex. for append mode).
+
+#define FS_SEEK_BEGIN		0x00
+#define FS_SEEK_CUR		0x01
+#define FS_SEEK_END		0x02
 
 
 // error codes:

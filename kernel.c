@@ -22,11 +22,19 @@ void kernel_main(void)
 	fs_ext2_gfs_init(&_fs);
 
 	//bios_vga_printf("create return code: %d\n", _fs.create(&_fs, "test", FS_CREATE_TYPE_DIR));
-	//bios_vga_printf("create return code: %d\n", _fs.create(&_fs, "test", FS_CREATE_TYPE_FILE));
 	//bios_vga_printf("unlink return code: %d\n", _fs.unlink(&_fs, "test"));
 	//bios_vga_printf("rename return code: %d\n", _fs.rename(&_fs, "readme", "do_not_read_me"));
 	void* fd = kmalloc(_fs.fd_size);
-	bios_vga_printf("open return code: %d\n", _fs.open(&_fs, fd, "readme", FS_OPEN_WRITE | FS_OPEN_RECREATE));
+	bios_vga_printf("open return code: %d\n", _fs.open(&_fs, fd, "readme", FS_OPEN_WRITE));
+	bios_vga_printf("seek return code: %ld\n", _fs.seek(&_fs, fd, -200, FS_SEEK_END));
+
+	char* test_buf = kmalloc(501);
+	size_t r = _fs.read(&_fs, fd, test_buf, 200);
+	bios_vga_printf("read bytes: %lu\n", r);
+	test_buf[r] = '\0';
+	bios_vga_printf("%s\n", test_buf);
+
+	bios_vga_printf("wrote bytes: %lu\n", _fs.write(&_fs, fd, "what a shame.\n", strlen("what a shame.\n")));
 
 	fs_ext2_sb sb;
 	fs_ext2_read_sb(&drives[0], &sb);
