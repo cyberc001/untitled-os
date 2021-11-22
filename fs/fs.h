@@ -5,6 +5,17 @@
 
 #include "../dev/ata.h"
 
+/* Directory entry structure for iterating though directory.
+*  Should be allocated by dir_iter_next() caller, including name field.
+*  If types are not supported, type field should always be FS_CREATE_TYPE_UNKNOWN.
+*/
+typedef struct{
+	size_t name_max;
+	char* name;
+
+	unsigned int type; // uses FS_CREATE_TYPE flags
+} file_system_dirent;
+
 /* Generic file system structure and functions.
 *  Functions for initializing a generic file system should be included for each
 *  separate file system in their header/source file.
@@ -14,7 +25,10 @@ typedef struct _file_system
 	ata_drive* drive;
 
 	const char* name;	// file system name, assigned by corresponding init() function
-	size_t fd_size;		// size of the file handler structure
+
+	size_t fd_size;		// size of file handler structure
+	size_t dit_size;	// size of directory iterator structure
+
 	void* gdata;		// generic data, depending on underlying file system
 				// (ex. superblock data for ext2)
 				// should be dynamically allocated, and kfree() is called
@@ -27,15 +41,16 @@ typedef struct _file_system
 	*    are handled by other modules (closer to system calls implementation).
 	*  - Memory for file descriptor should be allocated before calling open(),
 	*    and after calling close() (file systems don't manage memory).
-	*
 	*  - create(), unlink(), rename(), open() return 0 on success and other values
 	*    (often negative) on error, described through generic error codes below.
-	*
 	*  - lseek() returns new position on success and negative values on error.
-	*
 	*  - read() and write() return 0 on error or zero length reads/writes, and
 	*    amount of read/written bytes otherwise.
 	*    These operations also automatically seek past read/written data chunks.
+	*  - dir_iter_start() returns a negative error value if iterating through directory
+	*    is impossible (ex. it does not exist), 0 otherwise.
+	*  - dir_iter_next() returns 0 if there are no more entries in directory,
+	*    1 otherwise, and write fetched directory entry in 'dent' field.
 	*/
 
 	int (*create)(struct _file_system* fs, const char* path, int type);
@@ -48,6 +63,9 @@ typedef struct _file_system
 	long (*seek)(struct _file_system* fs, void* fd, long offset, int whence);
 	size_t (*read)(struct _file_system* fs, void* fd, void* buf, size_t count);
 	size_t (*write)(struct _file_system* fs, void* fd, const void* buf, size_t count);
+
+	int (*dir_iter_start)(struct _file_system* fs, void* iter, const char* path);
+	int (*dir_iter_next)(struct _file_system* fs, void* iter, file_system_dirent* dent);
 } file_system;
 
 

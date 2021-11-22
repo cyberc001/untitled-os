@@ -21,6 +21,14 @@ void kernel_main(void)
 	fs_scan(&_fs, &drives[0]);
 	bios_vga_printf("drive 0 file system: %s\n", _fs.name);
 
+	void* dit = kmalloc(_fs.dit_size);
+	_fs.dir_iter_start(&_fs, dit, "");
+	file_system_dirent dent = {.name = kmalloc(256), .name_max = 256};
+	while(_fs.dir_iter_next(&_fs, dit, &dent))
+	{
+		bios_vga_printf("%u %s\n", dent.type, dent.name);
+	}
+
 	/*fs_ext2_sb sb;
 	fs_ext2_read_sb(&drives[0], &sb);
 	bios_vga_printf("ext2 signature: 0x%X\n", (unsigned)sb.ext2_sig);

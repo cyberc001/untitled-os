@@ -610,6 +610,8 @@ static void fs_ext2_close(file_system* fs, void* fd);
 static long fs_ext2_seek(file_system* fs, void* fd, long offset, int whence);
 static size_t fs_ext2_read(file_system* fs, void* fd, void* buf, size_t count);
 static size_t fs_ext2_write(file_system* fs, void* fd, const void* buf, size_t count);
+static int fs_ext2_dir_iter_start(file_system* fs, void* iter, const char* path);
+static int fs_ext2_dir_iter_next(file_system* fs, void* iter, file_system_dirent* dent);
 
 
 // Initialization, conversion, etc. utils
@@ -639,6 +641,7 @@ void fs_ext2_gfs_init(file_system* fs)
 	fs_ext2_read_blkgrp_table(fs->drive, &gdat->sb, &gdat->bt);
 
 	fs->fd_size = sizeof(gfs_ext2_fd);
+	fs->dit_size = sizeof(fs_ext2_dir_iterator);
 
 	fs->create = &fs_ext2_create;
 	fs->unlink = &fs_ext2_unlink;
@@ -648,6 +651,8 @@ void fs_ext2_gfs_init(file_system* fs)
 	fs->seek = &fs_ext2_seek;
 	fs->read = &fs_ext2_read;
 	fs->write = &fs_ext2_write;
+	fs->dir_iter_start = &fs_ext2_dir_iter_start;
+	fs->dir_iter_next = &fs_ext2_dir_iter_next;
 }
 
 static inline int fs_ext2_type_fs2ext2_inode(int fs_type)
@@ -1354,4 +1359,42 @@ static size_t fs_ext2_write(file_system* fs, void* fd, const void* buf, size_t c
 	FS_EXT2_INODE_SET_SIZE(_fd->inode, FS_EXT2_INODE_GET_SIZE(_fd->inode) + count);
 	fs_ext2_write_inode(fs->drive, &gdat->sb, &gdat->bt, _fd->inode_num, &_fd->inode);
 	return count;
+}
+
+// ++++++++++++++++
+// dir_iter_start()
+// ++++++++++++++++
+static int fs_ext2_dir_iter_start(file_system* fs, void* iter, const char* path)
+{
+	gfs_ext2_gdata* gdat = (gfs_ext2_gdata*)fs->gdata;
+	fs_ext2_dir_iterator* it = (fs_ext2_dir_iterator*)iter;
+
+	fs_ext2_inode it_inode; uint32_t it_inode_num;
+	int err = fs_ext2_find_final_inode(fs, path, &it_inode, &it_inode_num);
+	if(err)
+		return err;
+
+	void* it_buf = kmalloc(FS_EXT2_SB_BLOCKSIZE(gdat->sb));
+	fs_ext2_iterate_dir_start(fs->drive, &gdat->sb, &it_inode, it, it_buf);
+	return 0;
+}
+
+// +++++++++++++++
+// dir_iter_next()
+// +++++++++++++++
+static int fs_ext2_dir_iter_next(file_system* fs, void* iter, file_system_dirent* dent)
+{
+	gfs_ext2_gdata* gdat = (gfs_ext2_gdata*)fs->gdata;
+	fs_ext2_dir_iterator* it = (fs_ext2_dir_iterator*)iter;
+
+	int ret = fs_ext2_iterate_dir_next(fs->drive, &gdat->sb, it);
+	strncpy(dent->name, it->cur.name, dent->name_max);
+	if(gdat->sb.req_features & FS_EXT2_SB_RWFEATURE_DIRS_HAVE_TYPE_FIELD)
+		dent->type = fs_ext2_type_ext22fs_inode(it->cur.type_byte);
+	else
+		dent->type = FS_CREATE_TYPE_UNKNOWN;
+
+	if(!ret)
+		kfree(it->blkbuf);
+	return ret;
 }
