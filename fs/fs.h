@@ -12,11 +12,13 @@
 typedef struct _file_system
 {
 	ata_drive* drive;
+
+	const char* name;	// file system name, assigned by corresponding init() function
 	size_t fd_size;		// size of the file handler structure
 	void* gdata;		// generic data, depending on underlying file system
 				// (ex. superblock data for ext2)
 				// should be dynamically allocated, and kfree() is called
-				// on deinitialization if not NULL (FIXME)
+				// on deinitialization if not NULL
 
 
 	/* - Most file operations use a generic void pointer file handler.
@@ -89,6 +91,16 @@ typedef struct _file_system
 #define FS_ERR_NO_SPACE			-5	// Not enough free space for operation.
 #define FS_ERR_TYPE_UNSUPPORTED		-6	// The operation does not support specified type
 						// (ex. create()).
+
+
+/* Scans specified drive, trying to identify a valid file system.
+*  Uses functions defined as "int fs_XX_gfs_detect(file_system*)",
+*  where XX - certain file system name. All probed file systems headers
+*  and source files are in fs directory.
+*  When a valid file system is found, it is initialized by a function such as
+*  "fs_XX_gfs_init(file_system*)", and 1 is returned. Otherwise, 0 is returned.
+*/
+int fs_scan(file_system* fs, ata_drive* drive);
 
 //-----------------------
 // Path parsing functions

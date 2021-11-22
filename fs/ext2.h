@@ -358,10 +358,13 @@ int fs_ext2_write_inode_data(ata_drive* drive, fs_ext2_sb* sb, fs_ext2_inode* in
 					uint32_t bind, void* bin);
 
 
-// ----------------------
+// ---------
 // GFS setup
-// ----------------------
+// ---------
 
+int fs_ext2_gfs_detect(file_system* fs);
 void fs_ext2_gfs_init(file_system* fs);
 
 #endif
+
+

@@ -613,8 +613,22 @@ static size_t fs_ext2_write(file_system* fs, void* fd, const void* buf, size_t c
 
 
 // Initialization, conversion, etc. utils
+
+int fs_ext2_gfs_detect(file_system* fs)
+{
+	fs_ext2_sb sb;
+	sb.ext2_sig = 0;
+	fs_ext2_read_sb(fs->drive, &sb);
+
+	if(sb.ext2_sig == 0xEF53)
+		return 1;
+	return 0;
+}
+
 void fs_ext2_gfs_init(file_system* fs)
 {
+	fs->name = "ext2";
+
 	fs->gdata = kmalloc(sizeof(gfs_ext2_gdata));
 	gfs_ext2_gdata* gdat = (gfs_ext2_gdata*)fs->gdata;
 

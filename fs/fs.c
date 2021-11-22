@@ -1,5 +1,16 @@
 #include "fs.h"
 
+#include "ext2.h"
+int fs_scan(file_system* fs, ata_drive* drive)
+{
+	fs->drive = drive;
+	if(fs_ext2_gfs_detect(fs))
+	{ fs_ext2_gfs_init(fs); return 1; }
+
+	fs->name = "none";
+	return 0;
+}
+
 //-----------------------
 // Path parsing functions
 //-----------------------
