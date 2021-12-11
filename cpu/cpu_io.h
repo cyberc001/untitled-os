@@ -39,7 +39,8 @@ static inline void cpu_out32(uint32_t port, uint32_t val)
 	asm volatile ("outl %%eax, %%dx" :: "d"(port), "a"(val));
 }
 
-
+#else
+	#error CPU port I/O is not supported for this platform
 #endif
 
 #endif

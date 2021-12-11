@@ -37,18 +37,27 @@ typedef struct _file_system
 
 	/* - Most file operations use a generic void pointer file handler.
 	*    Structure and usage of each file system's handler type varies.
+	*
 	*  - File descriptors in terms of write/read protection (ex. for multi-processing)
 	*    are handled by other modules (closer to system calls implementation).
+	*
 	*  - Memory for file descriptor should be allocated before calling open(),
 	*    and after calling close() (file systems don't manage memory).
+	*
 	*  - create(), unlink(), rename(), open() return 0 on success and other values
 	*    (often negative) on error, described through generic error codes below.
+	*
 	*  - lseek() returns new position on success and negative values on error.
+	*
 	*  - read() and write() return 0 on error or zero length reads/writes, and
 	*    amount of read/written bytes otherwise.
 	*    These operations also automatically seek past read/written data chunks.
+	*
+	*  - get_size() returns 0 on error or on an empty file.
+	*
 	*  - dir_iter_start() returns a negative error value if iterating through directory
 	*    is impossible (ex. it does not exist), 0 otherwise.
+	*
 	*  - dir_iter_next() returns 0 if there are no more entries in directory,
 	*    1 otherwise, and write fetched directory entry in 'dent' field.
 	*/
@@ -59,6 +68,7 @@ typedef struct _file_system
 
 	int (*open)(struct _file_system* fs, void* fd, const char* path, int flags);
 	void (*close)(struct _file_system* fs, void* fd);
+	size_t (*get_size)(struct _file_system* fs, void* fd);
 
 	long (*seek)(struct _file_system* fs, void* fd, long offset, int whence);
 	size_t (*read)(struct _file_system* fs, void* fd, void* buf, size_t count);

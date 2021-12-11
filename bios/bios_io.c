@@ -169,6 +169,8 @@ static void bios_vga_put ## tname (T num)\
 }
 DEF_BIOS_VGA_PUT_NUM_HEXL(x, unsigned int);
 DEF_BIOS_VGA_PUT_NUM_HEXU(X, unsigned int);
+DEF_BIOS_VGA_PUT_NUM_HEXL(p, unsigned int);
+DEF_BIOS_VGA_PUT_NUM_HEXU(P, unsigned int);
 
 
 void bios_vga_printf(const char* format, ...)
@@ -201,6 +203,13 @@ void bios_vga_printf(const char* format, ...)
 					break;
 				case 'X':
 					bios_vga_putX(va_arg(args, unsigned int));
+					break;
+
+				case 'p':
+					bios_vga_putp((unsigned int)va_arg(args, void*));
+					break;
+				case 'P':
+					bios_vga_putP((unsigned int)va_arg(args, void*));
 					break;
 
 				case 'l':

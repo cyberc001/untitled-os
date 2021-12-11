@@ -3,31 +3,39 @@ AS=i686-elf-as $(AS_FLAGS)
 
 CC_INCLUDE=-Icstdlib
 CC_ARCH_FLAG=-D CPU_I386
-CC_FLAGS=-std=gnu99 -ffreestanding -O2 -Wall -Wextra -fms-extensions $(CC_ARCH_FLAG)
+CC_BIT_FLAG=-D CPU_32BIT
+CC_FLAGS=-std=gnu99 -ffreestanding -O2 -Wall -Wextra -fms-extensions $(CC_ARCH_FLAG) $(CC_BIT_FLAG)
 CC=i686-elf-gcc $(CC_INCLUDE) $(CC_FLAGS)
+LD=i686-elf-ld
+
+# OS core (module loader) compilation
 
 iso/boot/myos.iso: iso/boot/myos.bin
 	-rm iso/boot/myos.iso
 	grub-file --is-x86-multiboot iso/boot/myos.bin
 	grub-mkrescue -o $@ iso
 
-iso/boot/myos.bin: boot.o kernel.o bios/bios_io.o kernlib/kernmem.o cstdlib/string.o cpu/pci.o dev/ata.o dev/pio.o fs/fs.o fs/ext2.o
+iso/boot/myos.bin: boot.o kernel.o bios/bios_io.o kernlib/kernmem.o cstdlib/string.o cpu/pci.o cpu/x86/gdt.o cpu/x86/idt.o dev/ata.o dev/pio.o fs/fs.o fs/ext2.o bin/elf.o bin/module.o
 	$(CC) -nostdlib -T kernel.ld -o $@ $^ -lgcc
 
 boot.o: boot.s
 	$(AS) -o $@ -c $<
-kernel.o: kernel.c bios/bios_io.h kernlib/kernmem.h kernlib/kerndefs.h cpu/pci.h dev/pio.h dev/ata.h
+kernel.o: kernel.c bios/bios_io.h kernlib/kernmem.h kernlib/kerndefs.h cpu/pci.h cpu/cpu_mode.h dev/pio.h dev/ata.h
 	$(CC) -o $@ -c $<
 
-bios/bios_io.o: bios/bios_io.c bios/bios_io.h cstdlib/string.h
+bios/bios_io.o: bios/bios_io.c bios/bios_io.h
 	$(CC) -o $@ -c $<
 kernlib/kernmem.o: kernlib/kernmem.c kernlib/kernmem.h kernlib/kerndefs.h
 	$(CC) -o $@ -c $<
 
-cstdlib/string.o: cstdlib/string.c cstdlib/string.h
+cstdlib/string.o: cstdlib/string.c
 	$(CC) -o $@ -c $<
 
 cpu/pci.o: cpu/pci.c cpu/pci.h cpu/cpu_io.h
+	$(CC) -o $@ -c $<
+cpu/x86/gdt.o: cpu/x86/gdt.s cpu/x86/gdt.h
+	$(AS) -o $@ -c $<
+cpu/x86/idt.o: cpu/x86/idt.c cpu/x86/idt.h
 	$(CC) -o $@ -c $<
 
 dev/ata.o: dev/ata.c dev/ata.h
@@ -38,6 +46,11 @@ dev/pio.o: dev/pio.c dev/pio.h dev/ata.h cpu/pci.h
 fs/fs.o: fs/fs.c fs/fs.h dev/ata.h
 	$(CC) -o $@ -c $<
 fs/ext2.o: fs/ext2.c fs/ext2.h dev/ata.h fs/fs.h
+	$(CC) -o $@ -c $<
+
+bin/elf.o: bin/elf.c bin/elf.h fs/fs.h
+	$(CC) -o $@ -c $<
+bin/module.o: bin/module.c bin/module.h bin/elf.h fs/fs.h
 	$(CC) -o $@ -c $<
 
 # clean
@@ -51,8 +64,9 @@ clean:
 run:
 	qemu-system-i386 -cdrom iso/boot/myos.iso\
 			 -drive id=disk,file=atest.img,if=ide,cache=none,format=raw \
+			 -s
 
-# test image manipulation
+# test image
 img_refresh:
 	rm atest.img
 	cp ../atest.img .
@@ -62,3 +76,14 @@ img_mount:
 
 img_umount:
 	sudo umount ../mnt
+
+
+# virtual memory module
+modules/vmemory/vmemory.so: modules/vmemory/vmemory.o
+	$(LD) -shared -fPIC -nostdlib $^ -o $@
+	-sudu umount ../mnt
+	sudo mount -o loop modules.img ../mnt
+	sudo cp vmemory.so ../mnt
+	sudo umount ../mnt
+modules/vmemory/vmemory.o: modules/vmemory/vmemory.c modules/vmemory/vmemory.h
+	$(CC) -c $< -o $@ -fPIC

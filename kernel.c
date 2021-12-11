@@ -3,15 +3,23 @@
 #include "kernlib/kerndefs.h"
 
 #include "cpu/pci.h"
-#include "dev/pio.h"
-#include "dev/ata.h"
+#include "cpu/cpu_int.h"
+#include "cpu/cpu_mode.h"
+#include "cpu/x86/gdt.h"
+#include "cpu/x86/idt.h"
 
-#include "fs/ext2.h"
 #include "fs/fs.h"
+
+#include "bin/module.h"
 
 void kernel_main(void)
 {
 	bios_vga_init();
+
+	cpu_interrupt_set(0);
+	init_gdt_flat();
+	cpu_mode_set(CPU_MODE_PROTECTED);
+	init_idt();
 
 	pci_setup();
 	ata_drive drives[4];
@@ -21,31 +29,17 @@ void kernel_main(void)
 	fs_scan(&_fs, &drives[0]);
 	bios_vga_printf("drive 0 file system: %s\n", _fs.name);
 
-	void* dit = kmalloc(_fs.dit_size);
+	void* fd = kmalloc(_fs.fd_size);
+	_fs.open(&_fs, fd, "test_module.so", FS_OPEN_READ);
+	module module_memory;
+	module_load_kernmem(&module_memory, &_fs, fd);
+
+	/*void* dit = kmalloc(_fs.dit_size);
 	_fs.dir_iter_start(&_fs, dit, "");
 	file_system_dirent dent = {.name = kmalloc(256), .name_max = 256};
 	while(_fs.dir_iter_next(&_fs, dit, &dent))
 	{
 		bios_vga_printf("%u %s\n", dent.type, dent.name);
-	}
-
-	/*fs_ext2_sb sb;
-	fs_ext2_read_sb(&drives[0], &sb);
-	bios_vga_printf("ext2 signature: 0x%X\n", (unsigned)sb.ext2_sig);
-
-	fs_ext2_blkgrp_table bgrp_table = {kmalloc(FS_EXT2_SB_BLOCKGROUPS_TOTAL(sb) * sizeof(fs_ext2_blkgrp)),
-						FS_EXT2_SB_BLOCKGROUPS_TOTAL(sb)};
-	fs_ext2_read_blkgrp_table(&drives[0], &sb, &bgrp_table);
-
-	fs_ext2_inode ie1;
-	fs_ext2_read_inode(&drives[0], &sb, &bgrp_table, 2, &ie1);
-
-	fs_ext2_dir_iterator ie1_it;
-	void* ie1_buf = kmalloc(FS_EXT2_SB_BLOCKSIZE(sb));
-	fs_ext2_iterate_dir_start(&drives[0], &sb, &ie1, &ie1_it, ie1_buf);
-	while(fs_ext2_iterate_dir_next(&drives[0], &sb, &ie1_it))
-	{
-		bios_vga_printf("%d %d %lu %s\n", ie1_it.cur.name_length_lo, ie1_it.cur.entry_sz, ie1_it.cur.inode_num, ie1_it.cur.name);
 	}*/
 }
 

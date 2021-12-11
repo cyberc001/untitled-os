@@ -607,6 +607,7 @@ static int fs_ext2_unlink(file_system* fs, const char* path);
 static int fs_ext2_rename(file_system* fs, const char* old, const char* _new);
 static int fs_ext2_open(file_system* fs, void* fd, const char* path, int flags);
 static void fs_ext2_close(file_system* fs, void* fd);
+static size_t fs_ext2_get_size(file_system* fs, void* fd);
 static long fs_ext2_seek(file_system* fs, void* fd, long offset, int whence);
 static size_t fs_ext2_read(file_system* fs, void* fd, void* buf, size_t count);
 static size_t fs_ext2_write(file_system* fs, void* fd, const void* buf, size_t count);
@@ -648,6 +649,7 @@ void fs_ext2_gfs_init(file_system* fs)
 	fs->rename = &fs_ext2_rename;
 	fs->open = &fs_ext2_open;
 	fs->close = &fs_ext2_close;
+	fs->get_size = &fs_ext2_get_size;
 	fs->seek = &fs_ext2_seek;
 	fs->read = &fs_ext2_read;
 	fs->write = &fs_ext2_write;
@@ -1194,6 +1196,15 @@ static void fs_ext2_close(file_system* fs, void* fd)
 {
 	gfs_ext2_fd* _fd = (gfs_ext2_fd*)fd;
 	kfree(_fd->ptr.blkbuf);
+}
+
+// ++++++++++
+// get_size()
+// ++++++++++
+static size_t fs_ext2_get_size(file_system* fs, void* fd)
+{
+	gfs_ext2_fd* _fd = (gfs_ext2_fd*)fd;
+	return FS_EXT2_INODE_GET_SIZE(_fd->inode);
 }
 
 // +++++
