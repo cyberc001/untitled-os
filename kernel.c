@@ -17,6 +17,7 @@ void kernel_main(void)
 {
 	bios_vga_init();
 
+	pci_setup();
 	pic_remap_irqs(0x20, 0x28);
 
 	cpu_interrupt_set(0);
@@ -24,7 +25,7 @@ void kernel_main(void)
 	cpu_mode_set(CPU_MODE_PROTECTED);
 	cpu_interrupt_init();
 
-	pci_setup();
+
 	ata_drive drives[4];
 	ata_probe(drives);
 
@@ -36,13 +37,9 @@ void kernel_main(void)
 	_fs.open(&_fs, fd, "test_module.so", FS_OPEN_READ);
 	module module_memory;
 	module_load_kernmem(&module_memory, &_fs, fd);
+	module_add_to_gmt(&module_memory);
 
-	/*void* dit = kmalloc(_fs.dit_size);
-	_fs.dir_iter_start(&_fs, dit, "");
-	file_system_dirent dent = {.name = kmalloc(256), .name_max = 256};
-	while(_fs.dir_iter_next(&_fs, dit, &dent))
-	{
-		bios_vga_printf("%u %s\n", dent.type, dent.name);
-	}*/
+	const char* test_func = elf_get_function_gmt("test");
+	bios_vga_printf("return value: %s\n", ((const char*(*)())test_func)());
 }
 

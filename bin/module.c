@@ -3,6 +3,8 @@
 #include "../kernlib/kernmem.h"
 #include "../bios/bios_io.h"
 
+module_table gmt = {NULL, 0};
+
 int module_load_kernmem(module* md, file_system* fs, void* fd)
 {
 	elf_header ehd;
@@ -19,9 +21,17 @@ int module_load_kernmem(module* md, file_system* fs, void* fd)
 	err = elf_init_relocate(md->elf_data);
 	if(err) return err;
 
-	const char* test_func = elf_get_function(md->elf_data, "test");
-	bios_vga_printf("test function memory offset: %x\n", (void*)test_func - md->elf_data);
-	bios_vga_printf("return value: %s\n", ((const char*(*)())test_func)());
-
 	return 0;
+}
+
+void module_add_to_gmt(module* md)
+{
+	gmt.module_count++;
+
+	if(!gmt.modules)
+		gmt.modules = kmalloc(sizeof(module));
+	else
+		gmt.modules = krealloc(gmt.modules, gmt.module_count * sizeof(module));
+
+	gmt.modules[gmt.module_count-1] = *md;
 }

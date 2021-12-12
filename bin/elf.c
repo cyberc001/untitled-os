@@ -5,6 +5,8 @@
 #include "../kernlib/kernmem.h"
 #include "../bios/bios_io.h"
 
+#include "module.h"
+
 // ------------------------
 // Section header functions
 // ------------------------
@@ -41,33 +43,40 @@ static elf_symbol* elf_get_symbol(elf_header* header, uint32_t table, uint32_t i
 	elf_symbol* symb = (elf_symbol*)((void*)header + stb->offset) + ind;
 	return symb;
 }
-static elf_symbol* elf_lookup_symbol(elf_header* header, const char* name, elf_section_header** symtable_out)
+static elf_symbol* elf_lookup_symbol(const char* name, module_table* mt,
+					elf_section_header** symtable_out, module** module_out)
 {
-	// iterate through all section headers, choosing ones that are symbol tables
-	elf_section_header* sht = elf_get_section_header_table(header);
-	elf_section_header* sect = (void*)sht;
-	for(uint32_t i = 0; i < header->sht_entry_count;
-			++i, sect = (void*)sect + header->sht_entry_size)
+	// iterate through all loaded modules in GMT (global module table)
+	for(size_t m = 0; m < mt->module_count; ++m)
 	{
-		if(sect->type == ELF_SECT_TYPE_SYMTAB || sect->type == ELF_SECT_TYPE_DYNSYM)
-		{ // iterate through all symbols in the table
-			// section link contains section header index of the string table being used
-			char* stb = elf_get_strtable(header, sect->link);
-			uint32_t sym_cnt = sect->size / sect->entry_size;
+		elf_header* header = mt->modules[m].elf_data;
+		// iterate through all section headers, choosing ones that are symbol tables
+		elf_section_header* sht = elf_get_section_header_table(header);
+		elf_section_header* sect = (void*)sht;
+		for(uint32_t i = 0; i < header->sht_entry_count;
+				++i, sect = (void*)sect + header->sht_entry_size)
+		{
+			if(sect->type == ELF_SECT_TYPE_SYMTAB || sect->type == ELF_SECT_TYPE_DYNSYM)
+			{ // iterate through all symbols in the table
+				// section link contains section header index of the string table being used
+				char* stb = elf_get_strtable(header, sect->link);
+				uint32_t sym_cnt = sect->size / sect->entry_size;
 
-			elf_symbol* sym = (void*)header + sect->offset;
-			for(uint32_t j = 0; j < sym_cnt;
-				++j, sym = (void*)sym + sect->entry_size)
-			{
-				char* symname = stb + sym->name;
-				if(!strcmp(symname, name)){
-					if(symtable_out)
-						*symtable_out = sect;
-					return sym;
+				elf_symbol* sym = (void*)header + sect->offset;
+				for(uint32_t j = 0; j < sym_cnt;
+					++j, sym = (void*)sym + sect->entry_size)
+				{
+					char* symname = stb + sym->name;
+					if(!strcmp(symname, name)){
+						if(symtable_out) *symtable_out = sect;
+						if(module_out) *module_out = &mt->modules[m];
+						return sym;
+					}
 				}
 			}
 		}
 	}
+
 	return NULL;
 }
 
@@ -77,7 +86,7 @@ static int elf_get_symbol_value(elf_header* header, elf_section_header* symtable
 		char* stb = elf_get_strtable(header, symtable->link);
 		char* name = stb + symbol->name;
 
-		void* val_sym = elf_lookup_symbol(header, name, NULL); // lookup symbol in symbol string table
+		void* val_sym = elf_lookup_symbol(name, &gmt, NULL, NULL); // lookup symbol in symbol string table
 		if(!val_sym){
 			if(ELF_SYMBOL_INFO_BIND(*symbol) & ELF_SYMBOL_BIND_WEAK)
 				return 0;
@@ -276,13 +285,12 @@ int elf_init_relocate(void* elf_file)
 	return 0;
 }
 
-void* elf_get_function(void* elf_file, const char* name)
+void* elf_get_function_gmt(const char* name)
 {
-	elf_header* header = (elf_header*)elf_file;
-
+	module* md;
 	elf_section_header* sect;
-	elf_symbol* sym = elf_lookup_symbol(header, name, &sect);
+	elf_symbol* sym = elf_lookup_symbol(name, &gmt, &sect, &md);
 	if(!sym)
 		return NULL;
-	return (void*)elf_get_symbol_value(header, sect, sym);
+	return (void*)elf_get_symbol_value(md->elf_data, sect, sym);
 }

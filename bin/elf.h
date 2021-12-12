@@ -179,6 +179,6 @@ int elf_read_header(file_system* fs, void* fd, elf_header* header);
 int elf_init_nobits(void** elf_file, size_t* elf_file_size);
 int elf_init_relocate(void* elf_file);
 
-void* elf_get_function(void* elf_file, const char* name);
+void* elf_get_function_gmt(const char* name);
 
 #endif
