@@ -43,4 +43,13 @@ static inline void cpu_out32(uint32_t port, uint32_t val)
 	#error CPU port I/O is not supported for this platform
 #endif
 
+
+// misc operations
+
+// assuming port 0x80 is unused
+static inline void cpu_io_wait()
+{
+	cpu_out8(0x80, 0);
+}
+
 #endif

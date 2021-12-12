@@ -15,7 +15,7 @@ iso/boot/myos.iso: iso/boot/myos.bin
 	grub-file --is-x86-multiboot iso/boot/myos.bin
 	grub-mkrescue -o $@ iso
 
-iso/boot/myos.bin: boot.o kernel.o bios/bios_io.o kernlib/kernmem.o cstdlib/string.o cpu/pci.o cpu/x86/gdt.o cpu/x86/idt.o dev/ata.o dev/pio.o fs/fs.o fs/ext2.o bin/elf.o bin/module.o
+iso/boot/myos.bin: boot.o kernel.o bios/bios_io.o kernlib/kernmem.o cstdlib/string.o cpu/pci.o cpu/cpu_int.o cpu/x86/gdt.o cpu/x86/idt.o cpu/x86/pic.o dev/ata.o dev/pio.o fs/fs.o fs/ext2.o bin/elf.o bin/module.o
 	$(CC) -nostdlib -T kernel.ld -o $@ $^ -lgcc
 
 boot.o: boot.s
@@ -33,9 +33,14 @@ cstdlib/string.o: cstdlib/string.c
 
 cpu/pci.o: cpu/pci.c cpu/pci.h cpu/cpu_io.h
 	$(CC) -o $@ -c $<
+cpu/cpu_int.o: cpu/cpu_int.c cpu/cpu_int.h
+	$(CC) -o $@ -c $<
+
 cpu/x86/gdt.o: cpu/x86/gdt.s cpu/x86/gdt.h
 	$(AS) -o $@ -c $<
 cpu/x86/idt.o: cpu/x86/idt.c cpu/x86/idt.h
+	$(CC) -o $@ -c $<
+cpu/x86/pic.o: cpu/x86/pic.c cpu/x86/pic.h
 	$(CC) -o $@ -c $<
 
 dev/ata.o: dev/ata.c dev/ata.h
