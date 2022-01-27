@@ -176,9 +176,13 @@ typedef struct{
 // TODO: pay attention to failing to read the required amount of data
 int elf_read_header(file_system* fs, void* fd, elf_header* header);
 
+/* Allocates more data for and shifts sections that have address different from offset (ex. writable sections) */
+int elf_init_addresses(void** elf_file, size_t* elf_file_size);
+/* Initializes NOBITS sections */
 int elf_init_nobits(void** elf_file, size_t* elf_file_size);
 int elf_init_relocate(void* elf_file);
 
 void* elf_get_function_gmt(const char* name);
 
 #endif
+

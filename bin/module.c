@@ -16,6 +16,8 @@ int module_load_kernmem(module* md, file_system* fs, void* fd)
 	fs->seek(fs, fd, 0, FS_SEEK_BEGIN);
 	fs->read(fs, fd, md->elf_data, md->elf_data_size);
 
+	err = elf_init_addresses(&md->elf_data, &md->elf_data_size);
+	if(err) return err;
 	err = elf_init_nobits(&md->elf_data, &md->elf_data_size);
 	if(err) return err;
 	err = elf_init_relocate(md->elf_data);

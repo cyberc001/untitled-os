@@ -27,6 +27,8 @@ stack_top:
 
 _start:
 	mov $stack_top, %esp 	// stack init
+	pushl %ebx
+
 	call kernel_main	// call main kernel module (.c)
 
 	cli			// disable interrupts

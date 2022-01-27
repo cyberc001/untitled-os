@@ -101,9 +101,9 @@ static int elf_get_symbol_value(elf_header* header, elf_section_header* symtable
 	}
 	else{ // internal symbol
 		// FIXME
-		elf_section_header* val_sh = elf_get_section(header, symbol->hdt_index);
-		bios_vga_printf("%x %x\n", symbol->value, val_sh->offset);
-		return (int)((void*)header + symbol->value /*+ val_sh->offset*/);
+		/*elf_section_header* val_sh = */elf_get_section(header, symbol->hdt_index);
+		//bios_vga_printf("section index: %lu value: %lu offset: %lu\n", symbol->hdt_index, symbol->value, val_sh->offset);
+		return (int)((void*)header + symbol->value/* + val_sh->offset*/);
 	}
 }
 
@@ -120,11 +120,12 @@ static int elf_relocate_symbol(elf_header* header, elf_reloc* rel, elf_section_h
 	int symval = 0;
 	if(ELF_RELOC_SYMTAB_ENTRY(*rel)) // reloc is NOT pointing to symbol table entry at index 0
 	{
-		elf_get_symbol_value(header, elf_get_section(header, reltb->link),
+		symval = elf_get_symbol_value(header, elf_get_section(header, reltb->link),
 					elf_get_symbol(header, reltb->link, ELF_RELOC_SYMTAB_ENTRY(*rel)));
 		if(symval == ELF_ERR_EXTERN_SYMBOL_NOT_DEFINED)
 			return ELF_ERR_EXTERN_SYMBOL_NOT_DEFINED;
 	}
+	//bios_vga_printf("%lu: %lu %d %lu\n", ELF_RELOC_TYPE(*rel), *target_rel, symval, (uint32_t)header);
 	switch(ELF_RELOC_TYPE(*rel))
 	{
 		case ELF_RELOC_TYPE_NONE: // none
@@ -141,6 +142,9 @@ static int elf_relocate_symbol(elf_header* header, elf_reloc* rel, elf_section_h
 		case ELF_RELOC_TYPE_JMP_SLOT: // symbol (S)
 			*target_rel = *target_rel + symval;
 			break;
+		case ELF_RELOC_TYPE_RELATIVE: // base (B)
+			*target_rel = *target_rel + (uint32_t)header;
+			break;
 		default:
 			return ELF_ERR_UNSUPPORTED_RELOCATION_TYPE;
 	}
@@ -155,7 +159,7 @@ static int elf_relocate_symbol_addend(elf_header* header, elf_reloc_addend* rela
 	int symval = 0;
 	if(ELF_RELOC_SYMTAB_ENTRY(*rela)) // reloc is NOT pointing to symbol table entry at index 0
 	{
-		elf_get_symbol_value(header, elf_get_section(header, reltb->link),
+		symval = elf_get_symbol_value(header, elf_get_section(header, reltb->link),
 					elf_get_symbol(header, reltb->link, ELF_RELOC_SYMTAB_ENTRY(*rela)));
 		if(symval == ELF_ERR_EXTERN_SYMBOL_NOT_DEFINED)
 			return ELF_ERR_EXTERN_SYMBOL_NOT_DEFINED;
@@ -165,16 +169,19 @@ static int elf_relocate_symbol_addend(elf_header* header, elf_reloc_addend* rela
 		case ELF_RELOC_TYPE_NONE: // none
 			break;
 		case ELF_RELOC_TYPE_32: // symbol (S) + addend (A)
-			*target_rel = *target_rel + symval + rela->addend;
+			*target_rel = (uint32_t)(*target_rel + symval + rela->addend);
 			break;
 		case ELF_RELOC_TYPE_PC32: // symbol (S) + addend (A) - storage unit address/section offset (P)
-			*target_rel = *target_rel + symval + rela->addend - (uint32_t)target_rel;
+			*target_rel = (uint32_t)(*target_rel + symval + rela->addend - (uint32_t)target_rel);
 			break;
 		case ELF_RELOC_TYPE_GLOB_DAT: // symbol (S) + addend (A)
-			*target_rel = *target_rel + symval + rela->addend;
+			*target_rel = (uint32_t)(*target_rel + symval + rela->addend);
 			break;
 		case ELF_RELOC_TYPE_JMP_SLOT: // symbol (S) + addend (A)
-			*target_rel = *target_rel + symval + rela->addend;
+			*target_rel = (uint32_t)(*target_rel + symval + rela->addend);
+			break;
+		case ELF_RELOC_TYPE_RELATIVE: // base (B) + addend (A)
+			*target_rel = (uint32_t)(*target_rel + header + rela->addend);
 			break;
 		default:
 			return ELF_ERR_UNSUPPORTED_RELOCATION_TYPE;
@@ -210,6 +217,37 @@ int elf_read_header(file_system* fs, void* fd, elf_header* header)
 }
 
 
+int elf_init_addresses(void** elf_file, size_t* elf_file_size)
+{
+	elf_header* header = *((elf_header**)elf_file);
+
+	elf_section_header* sht = elf_get_section_header_table(header);
+	elf_section_header* sect = (void*)sht;
+	uint32_t max_addr = 0;
+	for(uint32_t i = 0; i < header->sht_entry_count;
+			++i, sect = (void*)sect + header->sht_entry_size)
+	{
+		if(sect->address + sect->size > max_addr)
+			max_addr = sect->address + sect->size;
+	}
+
+	*elf_file_size = max_addr;
+	*elf_file = krealloc(*elf_file, *elf_file_size);
+
+	header = *((elf_header**)elf_file);
+	sht = elf_get_section_header_table(header);
+	sect = (void*)sht;
+	for(uint32_t i = 0; i < header->sht_entry_count;
+			++i, sect = (void*)sect + header->sht_entry_size)
+	{
+		if(sect->address && sect->address != sect->offset){
+			memcpy((void*)header + sect->address, (void*)header + sect->offset, sect->size);
+		}
+	}
+
+	return 0;
+}
+
 int elf_init_nobits(void** elf_file, size_t* elf_file_size)
 {
 	elf_header* header = *((elf_header**)elf_file);
@@ -220,8 +258,6 @@ int elf_init_nobits(void** elf_file, size_t* elf_file_size)
 	for(uint32_t i = 0; i < header->sht_entry_count;
 			++i, sect = (void*)sect + header->sht_entry_size)
 	{
-		//bios_vga_printf("%lu %s\n", sect->type, elf_get_section_strtable(header) + sect->name);
-
 		if(sect->type == ELF_SECT_TYPE_NOBITS && sect->size
 		&& sect->flags & ELF_SECT_FLAG_ALLOC)
 		{

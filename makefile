@@ -15,7 +15,7 @@ iso/boot/myos.iso: iso/boot/myos.bin
 	grub-file --is-x86-multiboot iso/boot/myos.bin
 	grub-mkrescue -o $@ iso
 
-iso/boot/myos.bin: boot.o kernel.o bios/bios_io.o kernlib/kernmem.o cstdlib/string.o cpu/pci.o cpu/cpu_int.o cpu/x86/gdt.o cpu/x86/idt.o cpu/x86/pic.o dev/ata.o dev/pio.o fs/fs.o fs/ext2.o bin/elf.o bin/module.o
+iso/boot/myos.bin: boot.o kernel.o bios/bios_io.o kernlib/kernmem.o cstdlib/string.o cpu/pci.o cpu/cpu_int.o cpu/x86/gdt.o cpu/x86/idt.o cpu/x86/pic.o dev/ata.o dev/pio.o fs/fs.o fs/ext2.o bin/elf.o bin/module.o multiboot/mbt.o
 	$(CC) -nostdlib -T kernel.ld -o $@ $^ -lgcc
 
 boot.o: boot.s
@@ -58,6 +58,9 @@ bin/elf.o: bin/elf.c bin/elf.h fs/fs.h
 bin/module.o: bin/module.c bin/module.h bin/elf.h fs/fs.h
 	$(CC) -o $@ -c $<
 
+multiboot/mbt.o: multiboot/mbt.c multiboot/mbt.h
+	$(CC) -o $@ -c $<
+
 # clean
 clean:
 	-rm *.o
@@ -86,9 +89,19 @@ img_umount:
 # virtual memory module
 modules/vmemory/vmemory.so: modules/vmemory/vmemory.o
 	$(LD) -shared -fPIC -nostdlib $^ -o $@
-	-sudu umount ../mnt
+	-sudo umount ../mnt
 	sudo mount -o loop modules.img ../mnt
 	sudo cp vmemory.so ../mnt
 	sudo umount ../mnt
 modules/vmemory/vmemory.o: modules/vmemory/vmemory.c modules/vmemory/vmemory.h
+	$(CC) -c $< -o $@ -fPIC
+
+# test module
+test_module.so: test_module.o
+	$(LD) -shared -fPIC -nostdlib $^ -o $@
+	-sudo umount ../mnt
+	sudo mount -o loop atest.img ../mnt
+	sudo cp test_module.so ../mnt
+	sudo umount ../mnt
+test_module.o: test_module.c
 	$(CC) -c $< -o $@ -fPIC
