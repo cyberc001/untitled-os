@@ -2,6 +2,10 @@ iso/boot/myos.iso
 iso/boot/myos.bin
 *.o
 */*.o
+*/*/*.o
 *.img
 *.swp
 */*.swp
+*.so
+*/*.so
+qemu_log

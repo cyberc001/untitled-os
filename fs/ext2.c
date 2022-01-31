@@ -3,7 +3,7 @@
 #include "../cstdlib/string.h"
 #include "../kernlib/kernmem.h"
 
-#include "../bios/bios_io.h"
+#include "../dev/uart.h"
 
 // ---------------------
 // Public read interface

@@ -1,4 +1,6 @@
 #include "bios/bios_io.h"
+#include "dev/uart.h"
+
 #include "kernlib/kernmem.h"
 #include "kernlib/kerndefs.h"
 
@@ -36,7 +38,7 @@ void kernel_main(multiboot_info* mbi)
 	cpu_interrupt_init();
 
 	ata_drive drives[4];
-	ata_probe(drives);
+	uart_printf("%lu ATA drives detected\r\n", ata_probe(drives));
 
 	file_system _fs;
 	fs_scan(&_fs, &drives[0]);
@@ -48,12 +50,14 @@ void kernel_main(multiboot_info* mbi)
 	bios_vga_printf("loaded test module: %d\n", module_load_kernmem(&module_memory, &_fs, fd));
 	module_add_to_gmt(&module_memory);
 
+	cpu_interrupt_set(1);
+
 	const char* test_func = elf_get_function_gmt("test");
 	bios_vga_printf("func pointer: %p / %p\n", test_func, module_memory.elf_data);
 	bios_vga_printf("return value: %s\n", ((const char*(*)())test_func)());
 
-	/*test_func = elf_get_function_gmt("test2");
+	test_func = elf_get_function_gmt("test2");
 	bios_vga_printf("return pointer: %p\n", ((int*(*)())test_func)());
-	bios_vga_printf("return value: %d\n", *((int*(*)())test_func)());*/
+	bios_vga_printf("return value: %d\n", *((int*(*)())test_func)());
 }
 

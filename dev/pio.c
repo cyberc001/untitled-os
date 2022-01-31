@@ -1,5 +1,7 @@
 #include "pio.h"
 
+#include "uart.h"
+
 void pio_setup_drive(ata_drive* drive)
 {
 	ata_soft_reset(drive);

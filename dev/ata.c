@@ -7,6 +7,8 @@
 
 #include "pio.h"
 
+#include "../dev/uart.h"
+
 void ata_wait(ata_drive* drive)
 {
 	for(size_t i = 0; i < 4; ++i)
@@ -94,7 +96,7 @@ static void ata_detect_drive(ata_drive* drive)
 	for(size_t i = 0; i < ATA_SECTOR_SIZE; i += 2)
 	{
 		uint16_t _idnt = cpu_in16(drive->base + ATA_REG_DATA);
-		ide_ident[i] = _idnt & 0xFFFF; // TODO: isn't 0xFFFF 2 bytes?
+		ide_ident[i] = _idnt & 0xFF;
 		ide_ident[i+1] = (_idnt >> 8) & 0xFFFF;
 	}
 
@@ -168,11 +170,12 @@ size_t ata_probe(ata_drive drives_out[4])
 	size_t dev_detected = 0;
 	for(size_t i = 0; i < 4; ++i)
 	{
-		ata_detect_drive(&drives_out[i]);
+		ata_detect_drive(&drives_out[i]); // FIXME
 
 		switch(drives_out[i].type)
 		{
 			case ATA_DEVICE_PATA:
+			uart_printf("detected PATA drive #%lu\r\n", i);
 			pio_setup_drive(&drives_out[i]);
 			++dev_detected;
 			break;
@@ -180,3 +183,4 @@ size_t ata_probe(ata_drive drives_out[4])
 	}
 	return dev_detected;
 }
+

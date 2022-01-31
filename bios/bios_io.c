@@ -177,7 +177,6 @@ void bios_vga_printf(const char* format, ...)
 {
 	va_list args;
 	va_start(args, format);
-
 	for(; *format != '\0'; ++format)
 	{
 		if(*format == '%'){
