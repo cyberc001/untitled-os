@@ -26,7 +26,7 @@ iso/myos.iso: iso/myos.bin
 		--efi-boot limine-eltorito-efi.bin \
 		-efi-boot-part --efi-boot-image --protective-msdos-label \
 		iso -o iso/myos.iso
-iso/myos.bin: kernel.o kernlib/kernmem.o cstdlib/string.o cpu/pci.o cpu/cpu_int.o cpu/x86/gdt.o cpu/x86/gdt_s.o cpu/x86/idt.o cpu/x86/isr.o cpu/x86/isr_s.o cpu/x86/pic.o dev/ata.o dev/pio.o dev/uart.o fs/fs.o fs/ext2.o bin/elf.o bin/module.o
+iso/myos.bin: kernel.o kernlib/kernmem.o cstdlib/string.o cpu/pci.o cpu/cpu_int.o cpu/cpu_init.o cpu/x86/gdt.o cpu/x86/gdt_s.o cpu/x86/idt.o cpu/x86/isr.o cpu/x86/isr_s.o cpu/x86/pic.o dev/ata.o dev/pio.o dev/uart.o fs/fs.o fs/ext2.o bin/elf.o bin/module.o
 	$(LD) -T kernel.ld -o $@ $^
 
 kernel.o: kernel.c kernlib/kernmem.h kernlib/kerndefs.h cpu/pci.h cpu/cpu_mode.h dev/pio.h dev/ata.h
@@ -41,6 +41,8 @@ cstdlib/string.o: cstdlib/string.c
 cpu/pci.o: cpu/pci.c cpu/pci.h cpu/cpu_io.h
 	$(CC) -o $@ -c $<
 cpu/cpu_int.o: cpu/cpu_int.c cpu/cpu_int.h
+	$(CC) -o $@ -c $<
+cpu/cpu_init.o: cpu/cpu_init.c cpu/cpu_init.h cpu/x86/gdt.h cpu/x86/pic.h
 	$(CC) -o $@ -c $<
 
 cpu/x86/gdt.o: cpu/x86/gdt.c cpu/x86/gdt.h

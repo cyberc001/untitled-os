@@ -11,8 +11,7 @@
 #include "cpu/cpu_int.h"
 #include "cpu/cpu_mode.h"
 
-#include "cpu/x86/gdt.h"
-#include "cpu/x86/pic.h"
+#include "cpu/cpu_init.h"
 
 #include "fs/fs.h"
 #include "bin/module.h"
@@ -95,12 +94,11 @@ void kernel_main()
 {
 	uart_printf("Initializing PCI\r\n");
 	pci_setup();
-	uart_printf("Remapping IRQs\r\n");
-	pic_remap_irqs(0x20, 0x28);
 
 	cpu_interrupt_set(0);
-	uart_printf("Initializing a flat GDT\r\n");
-	gdt_init();
+	uart_printf("** Generic CPU initialization **\r\n");
+	cpu_init();
+	uart_printf("** End of genertic CPU initializtaion **\r\n");
 	uart_printf("Entering protected mode\r\n");
 	cpu_mode_set(CPU_MODE_PROTECTED);
 	uart_printf("Initializing interrupts\r\n");
@@ -120,7 +118,6 @@ void kernel_main()
 	uart_printf("drive 0 file system: %s\r\n", _fs.name);
 
 	void* fd = kmalloc(_fs.fd_size);
-	uart_printf("pointer test: %p\r\n", fd);
 	_fs.open(&_fs, fd, "test_module.so", FS_OPEN_READ);
 	module module_memory;
 	uart_printf("loaded test module: %d\r\n", module_load_kernmem(&module_memory, &_fs, fd));

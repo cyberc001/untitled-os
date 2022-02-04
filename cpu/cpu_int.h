@@ -12,7 +12,7 @@ static inline void cpu_interrupt_set(int enabled)
 }
 
 #else
-	#error manipulating CPU interrupts is not supported for this platform
+	#error manipulating CPU interrupt flag is not supported for this platform
 #endif
 
 
@@ -20,7 +20,6 @@ static inline void cpu_interrupt_set(int enabled)
 #define CPU_INT_TYPE_INTERRUPT	0
 #define CPU_INT_TYPE_TRAP	1
 #define CPU_INT_TYPE_TASK	2
-
 
 void cpu_interrupt_init();
 

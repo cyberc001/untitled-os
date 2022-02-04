@@ -9,3 +9,9 @@ iso/boot/myos.bin
 *.so
 */*.so
 qemu_log
+*.d
+*/*.d
+*/*/*.d
+iso/*.bin
+iso/*.iso
+*.so
