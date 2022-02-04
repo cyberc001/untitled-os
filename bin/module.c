@@ -1,7 +1,6 @@
 #include "module.h"
 
 #include "../kernlib/kernmem.h"
-#include "../bios/bios_io.h"
 
 module_table gmt = {NULL, 0};
 

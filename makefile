@@ -1,31 +1,37 @@
-AS_FLAGS=
+#export PATH := /home/cyb3rc001/build-binutils-2.37-x86_64-Linux-x86_64/gas:$(PATH)
+#export PATH := /home/cyb3rc001/build-binutils-2.37-x86_64-Linux-x86_64/ld:$(PATH)
+#export PATH := /home/cyb3rc001/build-gcc-11.2.0-x86_64-Linux-x86_64/gcc:$(PATH)
+
+AS_FLAGS=-g
 #-alm for assembly macro output
-AS=i686-elf-as $(AS_FLAGS)
+AS=x86_64-elf-as $(AS_FLAGS)
+
+NASM=nasm $(NASM_FLAGS)
+NASM_FLAGS=-felf64 -g -F dwarf
 
 CC_INCLUDE=-Icstdlib
 CC_ARCH_FLAG=-D CPU_I386
-CC_BIT_FLAG=-D CPU_32BIT
-CC_FLAGS=-std=gnu99 -ffreestanding -g -O2 -Wall -Wextra -fms-extensions $(CC_ARCH_FLAG) $(CC_BIT_FLAG)
-CC=i686-elf-gcc $(CC_INCLUDE) $(CC_FLAGS)
-LD=i686-elf-ld
+CC_BIT_FLAG=-D CPU_64BIT
+CC_INTERNAL_FLAGS=-I. -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -mabi=sysv -mno-80387 -mno-mmx -mno-3dnow -mno-sse -mno-sse2 -mno-red-zone -mcmodel=kernel -MMD
+CC_FLAGS= $(CC_INTERNAL_FLAGS) -g -O2 -Wall -Wextra -fms-extensions $(CC_ARCH_FLAG) $(CC_BIT_FLAG)
+CC=x86_64-elf-gcc $(CC_INCLUDE) $(CC_FLAGS)
+LD_INTERNAL_FLAGS=-nostdlib -static
+LD=x86_64-elf-ld $(LD_INTERNAL_FLAGS)
 
 # OS core (module loader) compilation
 
-iso/boot/myos.iso: iso/boot/myos.bin
-	-rm iso/boot/myos.iso
-	grub-file --is-x86-multiboot iso/boot/myos.bin
-	grub-mkrescue -o $@ iso
+iso/myos.iso: iso/myos.bin
+	xorriso -as mkisofs -b limine-cd.bin \
+		-no-emul-boot -boot-load-size 4 -boot-info-table \
+		--efi-boot limine-eltorito-efi.bin \
+		-efi-boot-part --efi-boot-image --protective-msdos-label \
+		iso -o iso/myos.iso
+iso/myos.bin: kernel.o kernlib/kernmem.o cstdlib/string.o cpu/pci.o cpu/cpu_int.o cpu/x86/gdt.o cpu/x86/gdt_s.o cpu/x86/idt.o cpu/x86/isr.o cpu/x86/isr_s.o cpu/x86/pic.o dev/ata.o dev/pio.o dev/uart.o fs/fs.o fs/ext2.o bin/elf.o bin/module.o
+	$(LD) -T kernel.ld -o $@ $^
 
-iso/boot/myos.bin: boot.o kernel.o bios/bios_io.o kernlib/kernmem.o cstdlib/string.o cpu/pci.o cpu/cpu_int.o cpu/x86/gdt.o cpu/x86/idt.o cpu/x86/isr.o cpu/x86/isr_s.o cpu/x86/pic.o dev/ata.o dev/pio.o dev/uart.o fs/fs.o fs/ext2.o bin/elf.o bin/module.o multiboot/mbt.o
-	$(CC) -nostdlib -T kernel.ld -o $@ $^ -lgcc
-
-boot.o: boot.s
-	$(AS) -o $@ -c $<
-kernel.o: kernel.c bios/bios_io.h kernlib/kernmem.h kernlib/kerndefs.h cpu/pci.h cpu/cpu_mode.h dev/pio.h dev/ata.h
+kernel.o: kernel.c kernlib/kernmem.h kernlib/kerndefs.h cpu/pci.h cpu/cpu_mode.h dev/pio.h dev/ata.h
 	$(CC) -o $@ -c $<
 
-bios/bios_io.o: bios/bios_io.c bios/bios_io.h
-	$(CC) -o $@ -c $<
 kernlib/kernmem.o: kernlib/kernmem.c kernlib/kernmem.h kernlib/kerndefs.h
 	$(CC) -o $@ -c $<
 
@@ -37,8 +43,10 @@ cpu/pci.o: cpu/pci.c cpu/pci.h cpu/cpu_io.h
 cpu/cpu_int.o: cpu/cpu_int.c cpu/cpu_int.h
 	$(CC) -o $@ -c $<
 
-cpu/x86/gdt.o: cpu/x86/gdt.s cpu/x86/gdt.h
-	$(AS) -o $@ -c $<
+cpu/x86/gdt.o: cpu/x86/gdt.c cpu/x86/gdt.h
+	$(CC) -o $@ -c $<
+cpu/x86/gdt_s.o: cpu/x86/gdt.s cpu/x86/gdt.h
+	$(NASM) -o $@ $<
 cpu/x86/idt.o: cpu/x86/idt.c cpu/x86/idt.h
 	$(CC) -o $@ -c $<
 cpu/x86/isr.o: cpu/x86/isr.c
@@ -65,22 +73,20 @@ bin/elf.o: bin/elf.c bin/elf.h fs/fs.h
 bin/module.o: bin/module.c bin/module.h bin/elf.h fs/fs.h
 	$(CC) -o $@ -c $<
 
-multiboot/mbt.o: multiboot/mbt.c multiboot/mbt.h
-	$(CC) -o $@ -c $<
-
 # clean
 clean:
 	-rm *.o
 	-rm ./*/*.o
-	-rm iso/boot/myos.bin
-	-rm iso/boot/myos.iso
+	-rm ./*/*/*.o
+	-rm iso/myos.bin
+	-rm iso/myos.iso
 
 # run emulator
 run:
-	qemu-system-i386 -cdrom iso/boot/myos.iso \
+	qemu-system-x86_64 -cdrom iso/myos.iso \
 			 -drive id=disk,file=atest.img,if=ide,cache=none,format=raw \
+			 #-S -gdb tcp::1234
 			 #-d int \
-			 #-S -gdb tcp::1234 \
 
 # test image
 img_refresh:

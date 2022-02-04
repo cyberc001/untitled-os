@@ -1,33 +1,49 @@
+OUTPUT_FORMAT(elf64-x86-64)
+OUTPUT_ARCH(i386:x86-64)
+ 
 ENTRY(_start)
+ 
+/* Program headers */
+PHDRS
+{
+	null    PT_NULL    FLAGS(0) ;                   /* Null segment */
+	text    PT_LOAD    FLAGS((1 << 0) | (1 << 2)) ; /* Execute-Read */
+	rodata  PT_LOAD    FLAGS((1 << 2)) ;            /* Read only */
+	data    PT_LOAD    FLAGS((1 << 1) | (1 << 2)) ; /* Write-Read */
+}
+ 
 SECTIONS
 {
-	. = 1M;
+	/* We wanna be placed in the topmost 2GiB of the address space, for optimisations */
+	/* and because that is what the stivale2 spec mandates. */
+	/* Any address in this region will do, but often 0xffffffff80000000 is chosen as */
+	/* that is the beginning of the region. */
+	. = 0xffffffff80000000;
  
-	/* multiboot header and entry point code */
-	.text BLOCK(4K) : ALIGN(4K)
-	{
-		*(.multiboot)
-		*(.text)
-	}
+	.text : {
+		*(.text .text.*)
+	} :text
  
-	/* read-only data */
-	.rodata BLOCK(4K) : ALIGN(4K)
-	{
-		*(.rodata)
-	}
+	. += CONSTANT(MAXPAGESIZE);
  
-	/* read-write data (initialized) */
-	.data BLOCK(4K) : ALIGN(4K)
-	{
-		*(.data)
-	}
+	/* We place the .stivale2hdr section containing the header in its own section, */
+	/* and we use the KEEP directive on it to make sure it doesn't get discarded. */
+	.stivale2hdr : {
+		KEEP(*(.stivale2hdr))
+	} :rodata
  
-	/* read-write data (uninitialized), stack */
-	.bss BLOCK(4K) : ALIGN(4K)
-	{
+	.rodata : {
+		*(.rodata .rodata.*)
+	} :rodata
+ 
+	. += CONSTANT(MAXPAGESIZE);
+ 
+	.data : {
+		*(.data .data.*)
+	} :data
+ 
+	.bss : {
 		*(COMMON)
-		*(.bss)
-	}
-
-	/* first free address: 1M + 4K * 4 = 1040K = 0x104000 */
+		*(.bss .bss.*)
+	} :data
 }

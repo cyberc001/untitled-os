@@ -1,7 +1,6 @@
 #include "kernmem.h"
 #include "kerndefs.h"
 
-#include "../bios/bios_io.h"
 #include "../cstdlib/string.h"
 
 // Basic heap memory implementation.

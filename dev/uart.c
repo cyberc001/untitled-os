@@ -118,8 +118,8 @@ static void uart_put ## tname (T num)\
 }
 DEF_UART_PUT_NUM_HEXL(x, unsigned int);
 DEF_UART_PUT_NUM_HEXU(X, unsigned int);
-DEF_UART_PUT_NUM_HEXL(p, unsigned int);
-DEF_UART_PUT_NUM_HEXU(P, unsigned int);
+DEF_UART_PUT_NUM_HEXL(p, unsigned long);
+DEF_UART_PUT_NUM_HEXU(P, unsigned long);
 
 void uart_printf(const char* format, ...)
 {
@@ -153,10 +153,10 @@ void uart_printf(const char* format, ...)
 					break;
 
 				case 'p':
-					uart_putp((unsigned int)va_arg(args, void*));
+					uart_putp((unsigned long)va_arg(args, void*));
 					break;
 				case 'P':
-					uart_putP((unsigned int)va_arg(args, void*));
+					uart_putP((unsigned long)va_arg(args, void*));
 					break;
 
 				case 'l':

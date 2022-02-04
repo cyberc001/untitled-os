@@ -3,7 +3,6 @@
 #include "string.h"
 
 #include "../kernlib/kernmem.h"
-#include "../bios/bios_io.h"
 
 #include "module.h"
 

@@ -709,6 +709,7 @@ static int fs_ext2_find_final_inode(file_system* fs, const char* path,
 	gfs_ext2_gdata* gdat = (gfs_ext2_gdata*)fs->gdata;
 
 	char* path_buf = kmalloc(strlen(path) + 1);
+	char* path_buf_fptr = path_buf;
 	strcpy(path_buf, path);
 
 	fs_ext2_inode cur_dir;
@@ -743,7 +744,7 @@ static int fs_ext2_find_final_inode(file_system* fs, const char* path,
 	else // else read the file inode number that was found above is pointing to
 		fs_ext2_read_inode(fs->drive, &gdat->sb, &gdat->bt, cur_inode_num, _out);
 	*_num_out = cur_inode_num;
-	kfree(it_buf); kfree(path_buf);
+	kfree(it_buf); kfree(path_buf_fptr);
 	return 0;
 }
 
