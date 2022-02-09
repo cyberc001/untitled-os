@@ -1,10 +1,10 @@
 #include "elf.h"
 
 #include "string.h"
-
 #include "../kernlib/kernmem.h"
 
 #include "module.h"
+#include "dev/uart.h"
 
 // ------------------------
 // Section header functions
@@ -21,7 +21,7 @@ static inline elf_section_header* elf_get_section(elf_header* header, size_t ind
 // ----------------------
 // String table functions
 // ----------------------
-static inline char* elf_get_strtable(elf_header* header, uint32_t table)
+static inline char* elf_get_strtable(elf_header* header, uint64_t table)
 {
 	elf_section_header* stb = elf_get_section(header, table);
 	return (char*)header + stb->offset;
@@ -36,73 +36,86 @@ static inline char* elf_get_section_strtable(elf_header* header)
 // ----------------
 // Symbol functions
 // ----------------
-static elf_symbol* elf_get_symbol(elf_header* header, uint32_t table, uint32_t ind)
+static elf_symbol* elf_get_symbol(elf_header* header, uint64_t table, uint64_t ind)
 {
 	elf_section_header* stb = elf_get_section(header, table); // symbol table
 	elf_symbol* symb = (elf_symbol*)((void*)header + stb->offset) + ind;
 	return symb;
 }
-static elf_symbol* elf_lookup_symbol(const char* name, module_table* mt,
+static elf_symbol* elf_lookup_symbol_in_elf(const char* name, elf_header* header, elf_section_header** symtable_out)
+{
+	// iterate through all section headers, choosing ones that are symbol tables
+	elf_section_header* sht = elf_get_section_header_table(header);
+	elf_section_header* sect = (void*)sht;
+	for(uint64_t i = 0; i < header->sht_entry_count;
+			++i, sect = (void*)sect + header->sht_entry_size)
+	{
+		if(sect->type == ELF_SECT_TYPE_SYMTAB || sect->type == ELF_SECT_TYPE_DYNSYM)
+		{ // iterate through all symbols in the table
+			// section link contains section header index of the string table being used
+			char* stb = elf_get_strtable(header, sect->link);
+			uint64_t sym_cnt = sect->size / sect->entry_size;
+			elf_symbol* sym = (void*)header + sect->offset;
+
+			for(uint64_t j = 0; j < sym_cnt;
+				++j, sym = (void*)sym + sect->entry_size)
+			{
+				char* symname = stb + sym->name;
+				if(!strcmp(symname, name)){
+					if(symtable_out) *symtable_out = sect;
+					return sym;
+				}
+			}
+		}
+	}
+	return NULL;
+}
+static elf_symbol* elf_lookup_symbol(const char* name, module_table* mt, elf_header* header,
 					elf_section_header** symtable_out, module** module_out)
 {
 	// iterate through all loaded modules in GMT (global module table)
 	for(size_t m = 0; m < mt->module_count; ++m)
 	{
-		elf_header* header = mt->modules[m].elf_data;
-		// iterate through all section headers, choosing ones that are symbol tables
-		elf_section_header* sht = elf_get_section_header_table(header);
-		elf_section_header* sect = (void*)sht;
-		for(uint32_t i = 0; i < header->sht_entry_count;
-				++i, sect = (void*)sect + header->sht_entry_size)
-		{
-			if(sect->type == ELF_SECT_TYPE_SYMTAB || sect->type == ELF_SECT_TYPE_DYNSYM)
-			{ // iterate through all symbols in the table
-				// section link contains section header index of the string table being used
-				char* stb = elf_get_strtable(header, sect->link);
-				uint32_t sym_cnt = sect->size / sect->entry_size;
-
-				elf_symbol* sym = (void*)header + sect->offset;
-				for(uint32_t j = 0; j < sym_cnt;
-					++j, sym = (void*)sym + sect->entry_size)
-				{
-					char* symname = stb + sym->name;
-					if(!strcmp(symname, name)){
-						if(symtable_out) *symtable_out = sect;
-						if(module_out) *module_out = &mt->modules[m];
-						return sym;
-					}
-				}
-			}
+		elf_symbol* sym = elf_lookup_symbol_in_elf(name, mt->modules[m].elf_data, symtable_out);
+		if(sym){
+			if(module_out) *module_out = &mt->modules[m];
+			return sym;
+		}
+	}
+	if(header){
+		elf_symbol* sym = elf_lookup_symbol_in_elf(name, header, symtable_out);
+		if(sym){
+			if(module_out) *module_out = NULL;
+			return sym;
 		}
 	}
 
 	return NULL;
 }
 
-static int elf_get_symbol_value(elf_header* header, elf_section_header* symtable, elf_symbol* symbol)
+static uint64_t elf_get_symbol_value(elf_header* header, elf_section_header* symtable, elf_symbol* symbol, int* error)
 {
 	if(!symbol->hdt_index){ // external symbol
 		char* stb = elf_get_strtable(header, symtable->link);
 		char* name = stb + symbol->name;
 
-		void* val_sym = elf_lookup_symbol(name, &gmt, NULL, NULL); // lookup symbol in symbol string table
+		elf_symbol* val_sym = elf_lookup_symbol(name, &gmt, header, NULL, NULL); // lookup symbol in symbol string table
 		if(!val_sym){
 			if(ELF_SYMBOL_INFO_BIND(*symbol) & ELF_SYMBOL_BIND_WEAK)
 				return 0;
-			return ELF_ERR_EXTERN_SYMBOL_NOT_DEFINED;
+			*error = ELF_ERR_EXTERN_SYMBOL_NOT_DEFINED;
+			return 0;
 		}
 		else{
-			return (int)val_sym;
+			return val_sym->value;
 		}
 	}
 	else if(symbol->hdt_index == ELF_SECT_INDEX_ABSOLUTE){ // absolute symbol; value does not change
 		return symbol->value;
 	}
 	else{ // internal symbol
-		// FIXME
 		/*elf_section_header* val_sh = */elf_get_section(header, symbol->hdt_index);
-		//bios_vga_printf("section index: %lu value: %lu offset: %lu\n", symbol->hdt_index, symbol->value, val_sh->offset);
-		return (int)((void*)header + symbol->value/* + val_sh->offset*/);
+		return (uint64_t)((void*)header + symbol->value/* + val_sh->offset*/);
 	}
 }
 
@@ -114,18 +127,18 @@ static int elf_relocate_symbol(elf_header* header, elf_reloc* rel, elf_section_h
 {
 	elf_section_header* target = elf_get_section(header, reltb->info);
 	void* target_addr = (void*)header + target->offset;
-	uint32_t* target_rel = (uint32_t*)(target_addr + rel->offset);
+	uint64_t* target_rel = (uint64_t*)(target_addr + rel->offset);
 
-	int symval = 0;
-	if(ELF_RELOC_SYMTAB_ENTRY(*rel)) // reloc is NOT pointing to symbol table entry at index 0
+	uint64_t symval = 0;
+	if(ELF_RELOC_SYM(rel->info)) // reloc is NOT pointing to symbol table entry at index 0
 	{
+		int err = 0;
 		symval = elf_get_symbol_value(header, elf_get_section(header, reltb->link),
-					elf_get_symbol(header, reltb->link, ELF_RELOC_SYMTAB_ENTRY(*rel)));
-		if(symval == ELF_ERR_EXTERN_SYMBOL_NOT_DEFINED)
+					elf_get_symbol(header, reltb->link, ELF_RELOC_SYM(rel->info)), &err);
+		if(err == ELF_ERR_EXTERN_SYMBOL_NOT_DEFINED)
 			return ELF_ERR_EXTERN_SYMBOL_NOT_DEFINED;
 	}
-	//bios_vga_printf("%lu: %lu %d %lu\n", ELF_RELOC_TYPE(*rel), *target_rel, symval, (uint32_t)header);
-	switch(ELF_RELOC_TYPE(*rel))
+	switch(ELF_RELOC_TYPE(rel->info))
 	{
 		case ELF_RELOC_TYPE_NONE: // none
 			break;
@@ -133,7 +146,7 @@ static int elf_relocate_symbol(elf_header* header, elf_reloc* rel, elf_section_h
 			*target_rel = *target_rel + symval;
 			break;
 		case ELF_RELOC_TYPE_PC32: // symbol - storage unit address/section offset (S - P)
-			*target_rel = *target_rel + symval - (uint32_t)target_rel;
+			*target_rel = *target_rel + symval - (uint64_t)target_rel;
 			break;
 		case ELF_RELOC_TYPE_GLOB_DAT: // symbol (S)
 			*target_rel = *target_rel + symval;
@@ -142,7 +155,7 @@ static int elf_relocate_symbol(elf_header* header, elf_reloc* rel, elf_section_h
 			*target_rel = *target_rel + symval;
 			break;
 		case ELF_RELOC_TYPE_RELATIVE: // base (B)
-			*target_rel = *target_rel + (uint32_t)header;
+			*target_rel = *target_rel + (uint64_t)header;
 			break;
 		default:
 			return ELF_ERR_UNSUPPORTED_RELOCATION_TYPE;
@@ -152,35 +165,38 @@ static int elf_relocate_symbol(elf_header* header, elf_reloc* rel, elf_section_h
 static int elf_relocate_symbol_addend(elf_header* header, elf_reloc_addend* rela, elf_section_header* reltb)
 {
 	elf_section_header* target = elf_get_section(header, reltb->info);
-	void* target_addr = (void*)header + target->offset;
-	uint32_t* target_rel = (uint32_t*)(target_addr + rela->offset);
+	void* target_addr = (void*)header + target->address;
+	uint64_t* target_rel = (uint64_t*)(target_addr + rela->offset);
 
-	int symval = 0;
-	if(ELF_RELOC_SYMTAB_ENTRY(*rela)) // reloc is NOT pointing to symbol table entry at index 0
+	uint64_t symval = 0;
+	if(ELF_RELOC_SYM(rela->info)) // reloc is NOT pointing to symbol table entry at index 0
 	{
+		int err = 0;
 		symval = elf_get_symbol_value(header, elf_get_section(header, reltb->link),
-					elf_get_symbol(header, reltb->link, ELF_RELOC_SYMTAB_ENTRY(*rela)));
-		if(symval == ELF_ERR_EXTERN_SYMBOL_NOT_DEFINED)
+					elf_get_symbol(header, reltb->link, ELF_RELOC_SYM(rela->info)), &err);
+		if(err == ELF_ERR_EXTERN_SYMBOL_NOT_DEFINED)
 			return ELF_ERR_EXTERN_SYMBOL_NOT_DEFINED;
 	}
-	switch(ELF_RELOC_TYPE(*rela))
+	switch(ELF_RELOC_TYPE(rela->info))
 	{
 		case ELF_RELOC_TYPE_NONE: // none
 			break;
 		case ELF_RELOC_TYPE_32: // symbol (S) + addend (A)
-			*target_rel = (uint32_t)(*target_rel + symval + rela->addend);
+			*target_rel = (uint64_t)(*target_rel + symval + rela->addend);
 			break;
 		case ELF_RELOC_TYPE_PC32: // symbol (S) + addend (A) - storage unit address/section offset (P)
-			*target_rel = (uint32_t)(*target_rel + symval + rela->addend - (uint32_t)target_rel);
+			*target_rel = (uint64_t)(*target_rel + symval + rela->addend - (uint64_t)target_rel);
 			break;
-		case ELF_RELOC_TYPE_GLOB_DAT: // symbol (S) + addend (A)
-			*target_rel = (uint32_t)(*target_rel + symval + rela->addend);
+		case ELF_RELOC_TYPE_GLOB_DAT: // symbol (S)
+			// DON'T LISTEN TO EVERYONE, IT NEEDS BASE OFFSET FOR SOME REASON;
+			// SINCE GOT IS NOT PROCESSED SEPARATELY, WTF IS THIS?
+			*target_rel = (uint64_t)(*target_rel + symval + (uint64_t)header);
 			break;
-		case ELF_RELOC_TYPE_JMP_SLOT: // symbol (S) + addend (A)
-			*target_rel = (uint32_t)(*target_rel + symval + rela->addend);
+		case ELF_RELOC_TYPE_JMP_SLOT: // symbol (S)
+			*target_rel = (uint64_t)(*target_rel + symval);
 			break;
 		case ELF_RELOC_TYPE_RELATIVE: // base (B) + addend (A)
-			*target_rel = (uint32_t)(*target_rel + header + rela->addend);
+			*target_rel = (uint64_t)((int64_t)header + rela->addend);
 			break;
 		default:
 			return ELF_ERR_UNSUPPORTED_RELOCATION_TYPE;
@@ -203,7 +219,7 @@ int elf_read_header(file_system* fs, void* fd, elf_header* header)
 		return ELF_ERR_INCORRECT_MAGIC;
 
 	#ifdef CPU_I386
-	if(header->ident.fields.file_class != ELF_CLASS_32)
+	if(header->ident.fields.file_class != ELF_CLASS_64)
 		return ELF_ERR_UNSUPPORTED_BITNESS;
 	if(header->ident.fields.encoding != ELF_DATA_2LSB) // TODO: add MSB support?
 		return ELF_ERR_UNSUPPORTED_ENDIANESS;
@@ -222,8 +238,8 @@ int elf_init_addresses(void** elf_file, size_t* elf_file_size)
 
 	elf_section_header* sht = elf_get_section_header_table(header);
 	elf_section_header* sect = (void*)sht;
-	uint32_t max_addr = 0;
-	for(uint32_t i = 0; i < header->sht_entry_count;
+	uint64_t max_addr = 0;
+	for(uint64_t i = 0; i < header->sht_entry_count;
 			++i, sect = (void*)sect + header->sht_entry_size)
 	{
 		if(sect->address + sect->size > max_addr)
@@ -236,7 +252,7 @@ int elf_init_addresses(void** elf_file, size_t* elf_file_size)
 	header = *((elf_header**)elf_file);
 	sht = elf_get_section_header_table(header);
 	sect = (void*)sht;
-	for(uint32_t i = 0; i < header->sht_entry_count;
+	for(uint64_t i = 0; i < header->sht_entry_count;
 			++i, sect = (void*)sect + header->sht_entry_size)
 	{
 		if(sect->address && sect->address != sect->offset){
@@ -288,16 +304,16 @@ int elf_init_nobits(void** elf_file, size_t* elf_file_size)
 int elf_init_relocate(void* elf_file)
 {
 	elf_header* header = (elf_header*)elf_file;
-
 	elf_section_header* sht = elf_get_section_header_table(header);
+
 	elf_section_header* sect = (void*)sht;
-	for(uint32_t i = 0; i < header->sht_entry_count;
+	for(uint64_t i = 0; i < header->sht_entry_count;
 			++i, sect = (void*)sect + header->sht_entry_size)
 	{
 		if(sect->type == ELF_SECT_TYPE_REL)
 		{ // relocation table
 			elf_reloc* rel = (void*)header + sect->offset;
-			for(uint32_t j = 0; j < sect->size / sect->entry_size;
+			for(uint64_t j = 0; j < sect->size / sect->entry_size;
 				++j, rel = (void*)rel + sect->entry_size)
 			{
 				int err;
@@ -308,7 +324,7 @@ int elf_init_relocate(void* elf_file)
 		else if(sect->type == ELF_SECT_TYPE_RELA)
 		{ // relocation table
 			elf_reloc_addend* rela = (void*)header + sect->offset;
-			for(uint32_t j = 0; j < sect->size / sect->entry_size;
+			for(uint64_t j = 0; j < sect->size / sect->entry_size;
 				++j, rela = (void*)rela + sect->entry_size)
 			{
 				int err;
@@ -324,8 +340,9 @@ void* elf_get_function_gmt(const char* name)
 {
 	module* md;
 	elf_section_header* sect;
-	elf_symbol* sym = elf_lookup_symbol(name, &gmt, &sect, &md);
+	elf_symbol* sym = elf_lookup_symbol(name, &gmt, NULL, &sect, &md);
 	if(!sym)
 		return NULL;
-	return (void*)elf_get_symbol_value(md->elf_data, sect, sym);
+	int err = 0;
+	return md->elf_data + elf_get_symbol_value(md->elf_data, sect, sym, &err);
 }

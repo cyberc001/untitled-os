@@ -6,10 +6,12 @@
 #include "../fs/fs.h"
 
 typedef uint16_t elf_half;
-typedef uint32_t elf_off;
-typedef uint32_t elf_addr;
+typedef uint64_t elf_off;
+typedef uint64_t elf_addr;
 typedef uint32_t elf_word;
 typedef int32_t elf_sword;
+typedef uint64_t elf_xword;
+typedef int64_t elf_sxword;
 
 typedef struct{
 	union{
@@ -56,14 +58,14 @@ typedef struct{
 typedef struct{
 	elf_word name;
 	elf_word type;
-	elf_word flags;
+	elf_xword flags;
 	elf_addr address;
 	elf_off offset;
-	elf_word size;		// section's size in bytes
+	elf_xword size;		// section's size in bytes
 	elf_word link;
 	elf_word info;
-	elf_word addralign;
-	elf_word entry_size; 	// inner entry size (symbol tables, etc.)
+	elf_xword addralign;
+	elf_xword entry_size; 	// inner entry size (symbol tables, etc.)
 } elf_section_header;
 
 #define ELF_SECT_TYPE_INACTIVE		0
@@ -110,18 +112,17 @@ typedef struct{
 #define ELF_SYMBOL_TYPE_FILE		4	// source file associated with object file
 
 typedef struct{
-	elf_addr offset; 	// relative position of symbol being relocated within its section
-	elf_word info; 		// upper bytes: entry in symtable to which relocation applies
-				// lower byte: type of relocation to apply
+	elf_addr offset;
+	elf_xword info;
 } elf_reloc;
 typedef struct{
 	elf_addr offset;
-	elf_word info;
-	elf_sword addend;	// a constant addend for computing value stored in relocatable field
+	elf_xword info;
+	elf_sxword addend;
 } elf_reloc_addend;
 
-#define ELF_RELOC_SYMTAB_ENTRY(rel) ((rel).info >> 8)
-#define ELF_RELOC_TYPE(rel) ((rel).info & 0xFF)
+#define ELF_RELOC_SYM(info) ((info) >> 32)
+#define ELF_RELOC_TYPE(info) ((info) & 0xFFFFFFFF)
 
 #define ELF_RELOC_TYPE_NONE		0
 #define ELF_RELOC_TYPE_32		1
@@ -180,6 +181,7 @@ int elf_read_header(file_system* fs, void* fd, elf_header* header);
 int elf_init_addresses(void** elf_file, size_t* elf_file_size);
 /* Initializes NOBITS sections */
 int elf_init_nobits(void** elf_file, size_t* elf_file_size);
+/* Relocates sections which offset does not equal to address (i.e. on different pages) */
 int elf_init_relocate(void* elf_file);
 
 void* elf_get_function_gmt(const char* name);

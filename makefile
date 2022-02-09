@@ -1,7 +1,3 @@
-#export PATH := /home/cyb3rc001/build-binutils-2.37-x86_64-Linux-x86_64/gas:$(PATH)
-#export PATH := /home/cyb3rc001/build-binutils-2.37-x86_64-Linux-x86_64/ld:$(PATH)
-#export PATH := /home/cyb3rc001/build-gcc-11.2.0-x86_64-Linux-x86_64/gcc:$(PATH)
-
 AS_FLAGS=-g
 #-alm for assembly macro output
 AS=x86_64-elf-as $(AS_FLAGS)
@@ -13,8 +9,9 @@ CC_INCLUDE=-Icstdlib
 CC_ARCH_FLAG=-D CPU_I386
 CC_BIT_FLAG=-D CPU_64BIT
 CC_INTERNAL_FLAGS=-I. -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -mabi=sysv -mno-80387 -mno-mmx -mno-3dnow -mno-sse -mno-sse2 -mno-red-zone -mcmodel=kernel -MMD
-CC_FLAGS= $(CC_INTERNAL_FLAGS) -g -O2 -Wall -Wextra -fms-extensions $(CC_ARCH_FLAG) $(CC_BIT_FLAG)
-CC=x86_64-elf-gcc $(CC_INCLUDE) $(CC_FLAGS)
+CC_FLAGS= -g -O2 -Wall -Wextra -fms-extensions $(CC_ARCH_FLAG) $(CC_BIT_FLAG)
+CC=x86_64-elf-gcc $(CC_INCLUDE) $(CC_FLAGS) $(CC_INTERNAL_FLAGS)
+CC_MODULE=x86_64-elf-gcc $(CC_INCLUDE) $(CC_FLAGS) $(CC_ARCH_FLAG) $(CC_BIT_FLAG)
 LD_INTERNAL_FLAGS=-nostdlib -static
 LD=x86_64-elf-ld $(LD_INTERNAL_FLAGS)
 
@@ -110,7 +107,7 @@ modules/vmemory/vmemory.so: modules/vmemory/vmemory.o
 	sudo cp vmemory.so ../mnt
 	sudo umount ../mnt
 modules/vmemory/vmemory.o: modules/vmemory/vmemory.c modules/vmemory/vmemory.h
-	$(CC) -c $< -o $@ -fPIC
+	$(CC_MODULE) -c $< -o $@ -fPIC
 
 # test module
 test_module.so: test_module.o
@@ -120,4 +117,4 @@ test_module.so: test_module.o
 	sudo cp test_module.so ../mnt
 	sudo umount ../mnt
 test_module.o: test_module.c
-	$(CC) -c $< -o $@ -fPIC
+	$(CC_MODULE) -c $< -o $@ -fPIC

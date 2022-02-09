@@ -124,8 +124,8 @@ void kernel_main()
 	module_add_to_gmt(&module_memory);
 
 	const char* test_func = elf_get_function_gmt("test");
-	uart_printf("func pointer: %p / %p\r\n", test_func, module_memory.elf_data);
-	uart_printf("return value: %s\r\n", ((const char*(*)())test_func)());
+	const char* val = ((const char*(*)())test_func)();
+	uart_printf("return value: %s\r\n", val);
 
 	test_func = elf_get_function_gmt("test2");
 	uart_printf("return pointer: %p\r\n", ((int*(*)())test_func)());

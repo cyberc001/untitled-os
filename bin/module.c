@@ -1,6 +1,7 @@
 #include "module.h"
 
 #include "../kernlib/kernmem.h"
+#include "dev/uart.h"
 
 module_table gmt = {NULL, 0};
 
