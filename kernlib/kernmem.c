@@ -58,6 +58,9 @@ void* kmalloc(size_t size)
 
 void* krealloc(void* ptr, size_t size)
 {
+	if(!ptr)
+		return kmalloc(size);
+
 	kmem_node* kn = ptr; kn--;
 
 	if(kn->next){ // if it's not the last element on the list, try to resize in the gap first

@@ -15,6 +15,7 @@
 
 #include "fs/fs.h"
 #include "bin/module.h"
+#include "bin/elf.h"
 
 void kernel_main();
 
@@ -117,15 +118,21 @@ void kernel_main()
 	fs_scan(&_fs, &drives[0]);
 	uart_printf("drive 0 file system: %s\r\n", _fs.name);
 
+	module_init_api();
+
+	module module_memory = {.name = "modload_memory"};
 	void* fd = kmalloc(_fs.fd_size);
 	_fs.open(&_fs, fd, "test_module.so", FS_OPEN_READ);
-	module module_memory;
-	uart_printf("loaded test module: %d\r\n", module_load_kernmem(&module_memory, &_fs, fd));
+	void* fd2 = kmalloc(_fs.fd_size);
+	_fs.open(&_fs, fd2, "test_module.dsc", FS_OPEN_READ);
+	uart_printf("loaded test module: %d\r\n", module_load_kernmem(&module_memory, &_fs, fd, fd2));
 	module_add_to_gmt(&module_memory);
 
 	const char* test_func = elf_get_function_gmt("test");
+	//uart_printf("LOCATION: %p\r\n", (void*)((void*)0x603cf0 - module_memory.elf_data));
+	//uart_printf("VALUE: %p\r\n", (void*)*((uint64_t*)0x603cf0));
 	const char* val = ((const char*(*)())test_func)();
-	uart_printf("return value: %s\r\n", val);
+	uart_printf("return value: %p\r\n", val);
 
 	test_func = elf_get_function_gmt("test2");
 	uart_printf("return pointer: %p\r\n", ((int*(*)())test_func)());

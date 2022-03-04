@@ -70,18 +70,35 @@ static elf_symbol* elf_lookup_symbol_in_elf(const char* name, elf_header* header
 	}
 	return NULL;
 }
-static elf_symbol* elf_lookup_symbol(const char* name, module_table* mt, elf_header* header,
+elf_symbol* elf_lookup_symbol(const char* name, const char** dependencies,
+					module_table* mt, elf_header* header,
 					elf_section_header** symtable_out, module** module_out)
 {
 	// iterate through all loaded modules in GMT (global module table)
-	for(size_t m = 0; m < mt->module_count; ++m)
+	if(dependencies || !header)
 	{
-		elf_symbol* sym = elf_lookup_symbol_in_elf(name, mt->modules[m].elf_data, symtable_out);
-		if(sym){
-			if(module_out) *module_out = &mt->modules[m];
-			return sym;
+		for(size_t m = 0; m < mt->module_count; ++m)
+		{
+			 // make sure this module should be searched (if it's in dependencies list)
+			if(dependencies)
+			{
+				for(const char** dep_it = dependencies; *dep_it; ++dep_it)
+				{
+					if(!strcmp(*dep_it, mt->modules[m].name))
+						goto is_dependency;
+				}
+				continue;
+			}
+			is_dependency:;
+
+			elf_symbol* sym = elf_lookup_symbol_in_elf(name, mt->modules[m].elf_data, symtable_out);
+			if(sym){
+				if(module_out) *module_out = &mt->modules[m];
+				return sym;
+			}
 		}
 	}
+	// look for symbols in the supplied ELF file
 	if(header){
 		elf_symbol* sym = elf_lookup_symbol_in_elf(name, header, symtable_out);
 		if(sym){
@@ -93,16 +110,27 @@ static elf_symbol* elf_lookup_symbol(const char* name, module_table* mt, elf_hea
 	return NULL;
 }
 
-static uint64_t elf_get_symbol_value(elf_header* header, elf_section_header* symtable, elf_symbol* symbol, int* error)
+uint64_t elf_get_symbol_value(elf_header* header, const char** dependencies, elf_section_header* symtable, elf_symbol* symbol, int* error)
 {
 	if(!symbol->hdt_index){ // external symbol
 		char* stb = elf_get_strtable(header, symtable->link);
 		char* name = stb + symbol->name;
 
-		elf_symbol* val_sym = elf_lookup_symbol(name, &gmt, header, NULL, NULL); // lookup symbol in symbol string table
+		uart_printf("lookup for %s\r\n", name);
+		elf_symbol* val_sym = elf_lookup_symbol(name, dependencies, &gmt, header, NULL, NULL); // lookup symbol in symbol string table
+		// if the lookup returned the symbol itself, look for it in the module loader API
+		if(val_sym == symbol){
+			for(size_t s = 0; s < gmapi.length; ++s){
+				if(!strcmp(gmapi.names[s], name)){
+					*error = ELF_HINT_MLOADER_API;
+					return gmapi.symbols[s];
+				}
+			}
+		}
 		if(!val_sym){
 			if(ELF_SYMBOL_INFO_BIND(*symbol) & ELF_SYMBOL_BIND_WEAK)
 				return 0;
+			// everything failed, returning an error
 			*error = ELF_ERR_EXTERN_SYMBOL_NOT_DEFINED;
 			return 0;
 		}
@@ -123,7 +151,7 @@ static uint64_t elf_get_symbol_value(elf_header* header, elf_section_header* sym
 // Relocation functions
 // --------------------
 
-static int elf_relocate_symbol(elf_header* header, elf_reloc* rel, elf_section_header* reltb)
+static int elf_relocate_symbol(elf_header* header, const char** dependencies, elf_reloc* rel, elf_section_header* reltb)
 {
 	elf_section_header* target = elf_get_section(header, reltb->info);
 	void* target_addr = (void*)header + target->offset;
@@ -133,7 +161,7 @@ static int elf_relocate_symbol(elf_header* header, elf_reloc* rel, elf_section_h
 	if(ELF_RELOC_SYM(rel->info)) // reloc is NOT pointing to symbol table entry at index 0
 	{
 		int err = 0;
-		symval = elf_get_symbol_value(header, elf_get_section(header, reltb->link),
+		symval = elf_get_symbol_value(header, dependencies, elf_get_section(header, reltb->link),
 					elf_get_symbol(header, reltb->link, ELF_RELOC_SYM(rel->info)), &err);
 		if(err == ELF_ERR_EXTERN_SYMBOL_NOT_DEFINED)
 			return ELF_ERR_EXTERN_SYMBOL_NOT_DEFINED;
@@ -162,17 +190,18 @@ static int elf_relocate_symbol(elf_header* header, elf_reloc* rel, elf_section_h
 	}
 	return 0;
 }
-static int elf_relocate_symbol_addend(elf_header* header, elf_reloc_addend* rela, elf_section_header* reltb)
+static int elf_relocate_symbol_addend(elf_header* header, const char** dependencies, elf_reloc_addend* rela, elf_section_header* reltb)
 {
 	elf_section_header* target = elf_get_section(header, reltb->info);
-	void* target_addr = (void*)header + target->address;
+	void* target_addr = (void*)header;// + target->address; NOT NEEDED
 	uint64_t* target_rel = (uint64_t*)(target_addr + rela->offset);
+	uart_printf("%p %p\r\n", (void*)target->offset, (void*)rela->offset);
 
 	uint64_t symval = 0;
+	int err = 0;
 	if(ELF_RELOC_SYM(rela->info)) // reloc is NOT pointing to symbol table entry at index 0
 	{
-		int err = 0;
-		symval = elf_get_symbol_value(header, elf_get_section(header, reltb->link),
+		symval = elf_get_symbol_value(header, dependencies, elf_get_section(header, reltb->link),
 					elf_get_symbol(header, reltb->link, ELF_RELOC_SYM(rela->info)), &err);
 		if(err == ELF_ERR_EXTERN_SYMBOL_NOT_DEFINED)
 			return ELF_ERR_EXTERN_SYMBOL_NOT_DEFINED;
@@ -188,12 +217,14 @@ static int elf_relocate_symbol_addend(elf_header* header, elf_reloc_addend* rela
 			*target_rel = (uint64_t)(*target_rel + symval + rela->addend - (uint64_t)target_rel);
 			break;
 		case ELF_RELOC_TYPE_GLOB_DAT: // symbol (S)
-			// DON'T LISTEN TO EVERYONE, IT NEEDS BASE OFFSET FOR SOME REASON;
-			// SINCE GOT IS NOT PROCESSED SEPARATELY, WTF IS THIS?
+			// for some reason, it needs base offset when it does not deal with external symbols
 			*target_rel = (uint64_t)(*target_rel + symval + (uint64_t)header);
 			break;
 		case ELF_RELOC_TYPE_JMP_SLOT: // symbol (S)
-			*target_rel = (uint64_t)(*target_rel + symval);
+			if(err == ELF_HINT_MLOADER_API)
+				*target_rel = symval;
+			else
+				*target_rel = (uint64_t)(*target_rel + symval);
 			break;
 		case ELF_RELOC_TYPE_RELATIVE: // base (B) + addend (A)
 			*target_rel = (uint64_t)((int64_t)header + rela->addend);
@@ -201,6 +232,8 @@ static int elf_relocate_symbol_addend(elf_header* header, elf_reloc_addend* rela
 		default:
 			return ELF_ERR_UNSUPPORTED_RELOCATION_TYPE;
 	}
+	uart_printf("offset: %p  type: %lu  val: %p\r\n", target_rel, ELF_RELOC_TYPE(rela->info), (void*)*target_rel);
+	uart_printf("VALUE: %p\r\n", (void*)*((uint64_t*)0x603cf0));
 	return 0;
 }
 
@@ -301,7 +334,7 @@ int elf_init_nobits(void** elf_file, size_t* elf_file_size)
 	return 0;
 }
 
-int elf_init_relocate(void* elf_file)
+int elf_init_relocate(void* elf_file, const char** dependencies)
 {
 	elf_header* header = (elf_header*)elf_file;
 	elf_section_header* sht = elf_get_section_header_table(header);
@@ -317,7 +350,7 @@ int elf_init_relocate(void* elf_file)
 				++j, rel = (void*)rel + sect->entry_size)
 			{
 				int err;
-				if((err = elf_relocate_symbol(header, rel, sect)))
+				if((err = elf_relocate_symbol(header, dependencies, rel, sect)))
 					return err;
 			}
 		}
@@ -328,7 +361,7 @@ int elf_init_relocate(void* elf_file)
 				++j, rela = (void*)rela + sect->entry_size)
 			{
 				int err;
-				if((err = elf_relocate_symbol_addend(header, rela, sect)))
+				if((err = elf_relocate_symbol_addend(header, dependencies, rela, sect)))
 					return err;
 			}
 		}
@@ -340,9 +373,9 @@ void* elf_get_function_gmt(const char* name)
 {
 	module* md;
 	elf_section_header* sect;
-	elf_symbol* sym = elf_lookup_symbol(name, &gmt, NULL, &sect, &md);
+	elf_symbol* sym = elf_lookup_symbol(name, NULL, &gmt, NULL, &sect, &md);
 	if(!sym)
 		return NULL;
 	int err = 0;
-	return md->elf_data + elf_get_symbol_value(md->elf_data, sect, sym, &err);
+	return md->elf_data + elf_get_symbol_value(md->elf_data, NULL, sect, sym, &err);
 }

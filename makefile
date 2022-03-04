@@ -67,7 +67,7 @@ fs/fs.o: fs/fs.c fs/fs.h dev/ata.h
 fs/ext2.o: fs/ext2.c fs/ext2.h dev/ata.h fs/fs.h
 	$(CC) -o $@ -c $<
 
-bin/elf.o: bin/elf.c bin/elf.h fs/fs.h
+bin/elf.o: bin/elf.c bin/elf.h fs/fs.h bin/module.h
 	$(CC) -o $@ -c $<
 bin/module.o: bin/module.c bin/module.h bin/elf.h fs/fs.h
 	$(CC) -o $@ -c $<

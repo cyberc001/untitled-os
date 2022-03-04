@@ -2,8 +2,9 @@
 #define ELF_H
 
 #include <stdint.h>
-
 #include "../fs/fs.h"
+
+#include "module.h"
 
 typedef uint16_t elf_half;
 typedef uint64_t elf_off;
@@ -161,6 +162,10 @@ typedef struct{
 
 #define ELF_ERR_UNSUPPORTED_RELOCATION_TYPE	-6
 
+// Hints:
+
+#define ELF_HINT_MLOADER_API		-100
+
 
 // ---------------------
 // ELF public interface:
@@ -181,9 +186,15 @@ int elf_read_header(file_system* fs, void* fd, elf_header* header);
 int elf_init_addresses(void** elf_file, size_t* elf_file_size);
 /* Initializes NOBITS sections */
 int elf_init_nobits(void** elf_file, size_t* elf_file_size);
-/* Relocates sections which offset does not equal to address (i.e. on different pages) */
-int elf_init_relocate(void* elf_file);
+/* Relocates sections which offset does not equal to address (i.e. on different pages)
+   dependencies is a null-terminated array of strings that tells in which modules in GMT this functions should look up symbols.
+*/
+int elf_init_relocate(void* elf_file, const char** dependencies);
 
+elf_symbol* elf_lookup_symbol(const char* name, const char** dependencies,
+				module_table* mt, elf_header* header,
+				elf_section_header** symtable_out, module** module_out);
+uint64_t elf_get_symbol_value(elf_header* header, const char** dependencies, elf_section_header* symtable, elf_symbol* symbol, int* error);
 void* elf_get_function_gmt(const char* name);
 
 #endif
