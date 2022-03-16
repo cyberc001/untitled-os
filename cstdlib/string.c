@@ -86,3 +86,11 @@ int strncmp(const char* restrict s1, const char* restrict s2, size_t n)
 	// TODO
 	return memcmp(s1, s2, strlen(s1)+1 < n ? strlen(s1)+1 : n);
 }
+
+const char* strchr(const char* restrict s, char c)
+{
+	for(; *s; ++s)
+		if(*s == c)
+			return s;
+	return NULL;
+}

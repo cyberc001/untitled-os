@@ -195,7 +195,9 @@ elf_symbol* elf_lookup_symbol(const char* name, const char** dependencies,
 				module_table* mt, elf_header* header,
 				elf_section_header** symtable_out, module** module_out);
 uint64_t elf_get_symbol_value(elf_header* header, const char** dependencies, elf_section_header* symtable, elf_symbol* symbol, int* error);
+
 void* elf_get_function_gmt(const char* name);
+void* elf_get_function_module(module* md, const char* name);
 
 #endif
 

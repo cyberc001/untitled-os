@@ -4,7 +4,6 @@
 #include "../kernlib/kernmem.h"
 
 #include "module.h"
-#include "dev/uart.h"
 
 // ------------------------
 // Section header functions
@@ -116,7 +115,6 @@ uint64_t elf_get_symbol_value(elf_header* header, const char** dependencies, elf
 		char* stb = elf_get_strtable(header, symtable->link);
 		char* name = stb + symbol->name;
 
-		uart_printf("lookup for %s\r\n", name);
 		elf_symbol* val_sym = elf_lookup_symbol(name, dependencies, &gmt, header, NULL, NULL); // lookup symbol in symbol string table
 		// if the lookup returned the symbol itself, look for it in the module loader API
 		if(val_sym == symbol){
@@ -195,7 +193,6 @@ static int elf_relocate_symbol_addend(elf_header* header, const char** dependenc
 	elf_section_header* target = elf_get_section(header, reltb->info);
 	void* target_addr = (void*)header;// + target->address; NOT NEEDED
 	uint64_t* target_rel = (uint64_t*)(target_addr + rela->offset);
-	uart_printf("%p %p\r\n", (void*)target->offset, (void*)rela->offset);
 
 	uint64_t symval = 0;
 	int err = 0;
@@ -221,10 +218,11 @@ static int elf_relocate_symbol_addend(elf_header* header, const char** dependenc
 			*target_rel = (uint64_t)(*target_rel + symval + (uint64_t)header);
 			break;
 		case ELF_RELOC_TYPE_JMP_SLOT: // symbol (S)
+			//uart_printf("%p %p %p\r\n", (void*)*target_rel, (void*)symval, (void*)header);
 			if(err == ELF_HINT_MLOADER_API)
 				*target_rel = symval;
 			else
-				*target_rel = (uint64_t)(*target_rel + symval);
+				*target_rel = (uint64_t)(symval + (uint64_t)header);
 			break;
 		case ELF_RELOC_TYPE_RELATIVE: // base (B) + addend (A)
 			*target_rel = (uint64_t)((int64_t)header + rela->addend);
@@ -232,8 +230,7 @@ static int elf_relocate_symbol_addend(elf_header* header, const char** dependenc
 		default:
 			return ELF_ERR_UNSUPPORTED_RELOCATION_TYPE;
 	}
-	uart_printf("offset: %p  type: %lu  val: %p\r\n", target_rel, ELF_RELOC_TYPE(rela->info), (void*)*target_rel);
-	uart_printf("VALUE: %p\r\n", (void*)*((uint64_t*)0x603cf0));
+	//printf("offset: %p rel: %p\r\n", (void*)rela->offset, (void*)*target_rel);
 	return 0;
 }
 
@@ -369,11 +366,22 @@ int elf_init_relocate(void* elf_file, const char** dependencies)
 	return 0;
 }
 
+
 void* elf_get_function_gmt(const char* name)
 {
 	module* md;
 	elf_section_header* sect;
 	elf_symbol* sym = elf_lookup_symbol(name, NULL, &gmt, NULL, &sect, &md);
+	if(!sym)
+		return NULL;
+	int err = 0;
+	return md->elf_data + elf_get_symbol_value(md->elf_data, NULL, sect, sym, &err);
+}
+
+void* elf_get_function_module(module* md, const char* name)
+{
+	elf_section_header* sect;
+	elf_symbol* sym = elf_lookup_symbol_in_elf(name, md->elf_data, &sect);
 	if(!sym)
 		return NULL;
 	int err = 0;

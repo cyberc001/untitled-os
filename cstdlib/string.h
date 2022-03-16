@@ -23,4 +23,6 @@ char* strncat(char* restrict dest, const char* restrict src, size_t n);
 int strcmp(const char* restrict s1, const char* restrict s2);
 int strncmp(const char* restrict s1, const char* restrict s2, size_t n);
 
+const char* strchr(const char* restrict s, char c);
+
 #endif

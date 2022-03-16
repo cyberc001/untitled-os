@@ -3,8 +3,6 @@
 #include "../cstdlib/string.h"
 #include "../kernlib/kernmem.h"
 
-#include "../dev/uart.h"
-
 // ---------------------
 // Public read interface
 // ---------------------
@@ -733,7 +731,7 @@ static int fs_ext2_find_final_inode(file_system* fs, const char* path,
 		}
 
 		if(!cur_inode_num){
-			kfree(it_buf); kfree(path_buf);
+			kfree(it_buf); kfree(path_buf_fptr);
 			return FS_ERR_DOESNT_EXIST;
 		}
 	}

@@ -22,6 +22,7 @@ void kernel_main();
 // Initial stack
 static uint8_t stack[8192];
 
+// Terminal tag (basically a NULL-terminator for list of stivale tags)
 static struct stivale2_header_tag_terminal terminal_hdr_tag =
 {
 	.tag = {
@@ -32,7 +33,7 @@ static struct stivale2_header_tag_terminal terminal_hdr_tag =
 };
 
 // Framebuffer header tag (defining custom graphical framebuffer, instead
-// of text mode):
+// of text mode)
 static struct stivale2_header_tag_framebuffer framebuffer_hdr_tag =
 {
 	.tag = {
@@ -44,7 +45,7 @@ static struct stivale2_header_tag_framebuffer framebuffer_hdr_tag =
 	.framebuffer_bpp    = 0
 };
 
-// Putting a header structure to stivale2 ELF section:
+// Putting a header structure to stivale2 ELF section
 __attribute__((section(".stivale2hdr"), used))
 static struct stivale2_header stivale_hdr =
 {
@@ -63,9 +64,9 @@ static struct stivale2_header stivale_hdr =
 };
 
 // scan for tags wanted from bootloader
-void *stivale2_get_tag(struct stivale2_struct *stivale2_struct, uint64_t id)
+void* stivale2_get_tag(struct stivale2_struct* stivale2_struct, uint64_t id)
 {
-	struct stivale2_tag *current_tag = (void*)stivale2_struct->tags;
+	struct stivale2_tag* current_tag = (void*)stivale2_struct->tags;
 	while(current_tag)
 	{
 		if(current_tag->identifier == id)
@@ -76,8 +77,9 @@ void *stivale2_get_tag(struct stivale2_struct *stivale2_struct, uint64_t id)
 }
 
 // First entry point
-void _start(struct stivale2_struct *stivale2_struct) {
-	struct stivale2_struct_tag_terminal *term_str_tag;
+void _start(struct stivale2_struct* stivale2_struct)
+{
+	struct stivale2_struct_tag_terminal* term_str_tag;
 	term_str_tag = stivale2_get_tag(stivale2_struct, STIVALE2_STRUCT_TAG_TERMINAL_ID);
 	if(!term_str_tag)
 		uart_printf("Couldn't find terminal tag!");
@@ -85,13 +87,13 @@ void _start(struct stivale2_struct *stivale2_struct) {
 	//void (*term_write)(const char *string, size_t length) = term_write_ptr;
 	//term_write("Hello World", 11);
 
-	kernel_main();
+	kernel_main(stivale2_struct);
 
 	for (;;)
         	asm ("hlt");
 }
 
-void kernel_main()
+void kernel_main(struct stivale2_struct* stivale2_struct)
 {
 	uart_printf("Initializing PCI\r\n");
 	pci_setup();
@@ -107,8 +109,6 @@ void kernel_main()
 	uart_printf("Enabling interrupts\r\n");
 	cpu_interrupt_set(1);
 
-	//asm volatile("int $3");
-
 	uart_printf("Probing ATA decives\r\n");
 	ata_drive drives[4];
 	uart_printf("%lu ATA drives detected\r\n", ata_probe(drives));
@@ -120,21 +120,37 @@ void kernel_main()
 
 	module_init_api();
 
-	module module_memory = {.name = "modload_memory"};
+	module module_vmemory = {.name = "modload_memory"};
+	void *modfd = kmalloc(_fs.fd_size), *descfd = kmalloc(_fs.fd_size);
+	_fs.open(&_fs, modfd, "vmemory.so", FS_OPEN_READ); // ?
+	_fs.open(&_fs, descfd, "vmemory.dsc", FS_OPEN_READ);
+	uart_printf("loaded memory virtualization module with code %d\r\n", module_load_kernmem(&module_vmemory, &_fs, modfd, descfd));
+	module_add_to_gmt(&module_vmemory);
+	uart_puts("\r\n");
+
+	struct stivale2_struct_tag_memmap *mmap_struct_tag = stivale2_get_tag(stivale2_struct, STIVALE2_STRUCT_TAG_MEMMAP_ID);
+	uint64_t memory_limit = 0;
+	for(uint64_t i = 0; i < mmap_struct_tag->entries; ++i)
+		if(mmap_struct_tag->memmap[i].base + mmap_struct_tag->memmap[i].length > memory_limit)
+			memory_limit = mmap_struct_tag->memmap[i].base + mmap_struct_tag->memmap[i].length;
+	uart_printf("Available memory: %lu\r\n", memory_limit);
+
+	int(*vmemory_init)() = elf_get_function_module(&module_vmemory, "init");
+	vmemory_init(memory_limit);
+
+	/*module module_memory = {.name = "modload_memory"};
 	void* fd = kmalloc(_fs.fd_size);
 	_fs.open(&_fs, fd, "test_module.so", FS_OPEN_READ);
 	void* fd2 = kmalloc(_fs.fd_size);
 	_fs.open(&_fs, fd2, "test_module.dsc", FS_OPEN_READ);
 	uart_printf("loaded test module: %d\r\n", module_load_kernmem(&module_memory, &_fs, fd, fd2));
-	module_add_to_gmt(&module_memory);
+	module_add_to_gmt(&module_memory);*/
 
-	const char* test_func = elf_get_function_gmt("test");
-	//uart_printf("LOCATION: %p\r\n", (void*)((void*)0x603cf0 - module_memory.elf_data));
-	//uart_printf("VALUE: %p\r\n", (void*)*((uint64_t*)0x603cf0));
+	/*const char* test_func = elf_get_function_gmt("test");
 	const char* val = ((const char*(*)())test_func)();
 	uart_printf("return value: %p\r\n", val);
 
 	test_func = elf_get_function_gmt("test2");
 	uart_printf("return pointer: %p\r\n", ((int*(*)())test_func)());
-	uart_printf("return value: %d\r\n", *((int*(*)())test_func)());
+	uart_printf("return value: %d\r\n", *((int*(*)())test_func)());*/
 }
