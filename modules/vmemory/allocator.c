@@ -33,11 +33,12 @@ void alloc_tree_insert(node* n);
 void alloc_tree_insertp(node* n, node* p, int dir);
 void alloc_tree_delete(node *n);
 
+node* alloc_tree_rotate(node* p, int dir);
+
 #define alloc_tree_find_first_fit(size) alloc_tree_find_first_fit_r(alloc_tree.root, size)
 node* alloc_tree_find_first_fit_r(node* n, uint64_t size);
 node* alloc_tree_find(void* address);
-
-node* alloc_tree_rotate(node* p, int dir);
+node* alloc_tree_find_containing(void* address, uint64_t size);
 
 #define alloc_tree_print() alloc_tree_print_r(alloc_tree.root, 0)
 void alloc_tree_print_r(node* n, unsigned depth);
@@ -80,9 +81,97 @@ void allocator_init(uint64_t memory_limit)
 }
 
 
-void* allocator_give(uint64_t size)
+void* allocator_alloc(uint64_t size)
 {
+	node* n = alloc_tree_find_first_fit(size);
+	if(!n)
+		return NULL;
+
+	if(n->size == size)
+	{ // perfect fit
+		void* ret = n->address;
+		alloc_tree_delete(n);
+		return ret;
+	}
+	else
+	{ // n->size > size, shrinking the free space and shifting address up
+		void* ret = n->address;
+		n->size -= size;
+		n->address += size;
+		return ret;
+	}
+}
+
+void* allocator_alloc_addr(uint64_t size, void* address)
+{
+	node* n = alloc_tree_find_containing(address, size);
+	if(!n)
+		return NULL;
+
+	if(n->size == size)
+	{ // perfect fit
+		alloc_tree_delete(n);
+		return address;
+	}
+	else
+	{ // requested address might be lying somewhere in [n->address; n->address + n->size - size]
+		// splitting the node into 2 parts
+		void *addr1 = n->address, *addr2 = address + size;
+		uint64_t size1 = (uint64_t)(address - n->address), size2 = (uint64_t)(n->address + n->size - address - size);
+		alloc_tree_delete(n);
+		if(size1){
+			node* _new = kmalloc(sizeof(node));
+			_new->address = addr1; _new->size = size1;
+			alloc_tree_insert(_new);
+		}
+		if(size2){
+			node* _new = kmalloc(sizeof(node));
+			_new->address = addr2; _new->size = size2;
+			alloc_tree_insert(_new);
+		}
+		alloc_tree_print();
+		return address;
+	}
+}
+
+node* free_lr(node* n, void* address)
+{
+	if(n->address + n->size == address)
+		return n;
+
+	if(n->child[TREE_DIR_LEFT]) { node* nn = free_lr(n->child[TREE_DIR_LEFT], address); if(nn) return nn; }
+	if(n->child[TREE_DIR_RIGHT]) { node* nn = free_lr(n->child[TREE_DIR_RIGHT], address); if(nn) return nn; }
+
 	return NULL;
+}
+node* free_rr(node* n, void* address, uint64_t size)
+{
+	if(address + size == n->address)
+		return n;
+
+	if(n->child[TREE_DIR_LEFT]) { node* nn = free_rr(n->child[TREE_DIR_LEFT], address, size); if(nn) return nn; }
+	if(n->child[TREE_DIR_RIGHT]) { node* nn = free_rr(n->child[TREE_DIR_RIGHT], address, size); if(nn) return nn; }
+
+	return NULL;
+}
+void allocator_free(void* address, uint64_t size)
+{
+	node* _new = kmalloc(sizeof(node));
+	_new->address = address; _new->size = size;
+	alloc_tree_insert(_new);
+
+	node* merge_l = free_lr(_new->child[TREE_DIR_LEFT], address);
+	node* merge_r = free_rr(_new->child[TREE_DIR_RIGHT], address, size);
+
+	if(merge_l){
+		_new->address = merge_l->address;
+		_new->size += merge_l->size;
+		alloc_tree_delete(merge_l);
+	}
+	if(merge_r){
+		_new->size += merge_r->size;
+		alloc_tree_delete(merge_r);
+	}
 }
 
 
@@ -314,6 +403,17 @@ node* alloc_tree_find(void* address)
 	}
 	return NULL;
 }
+/* BT traversal by address, but the criteria is address + size interval lying in free space */
+node* alloc_tree_find_containing(void* address, uint64_t size)
+{
+	node* cur = alloc_tree.root;
+	while(cur){
+		if(address >= cur->address && address + size <= cur->address + cur->size)
+			return cur;
+		cur = (address < cur->address) ? cur->child[TREE_DIR_LEFT] : cur->child[TREE_DIR_RIGHT];
+	}
+	return NULL;
+}
 
 // RB tree helper functions
 
@@ -343,7 +443,7 @@ void alloc_tree_print_r(node* n, unsigned depth)
 		uart_printf("--\r\n"); // it's a leaf
 		return;
 	}
-	uart_printf("%c %p $ %lu\r\n", n->color == TREE_CLR_BLACK ? 'B' : 'R', n->address, n->size);
+	uart_printf("%c %p $ %p\r\n", n->color == TREE_CLR_BLACK ? 'B' : 'R', n->address, (void*)n->size);
 
 	alloc_tree_print_r(n->child[TREE_DIR_LEFT], depth + 1);
 	alloc_tree_print_r(n->child[TREE_DIR_RIGHT], depth + 1);
