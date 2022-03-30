@@ -20,17 +20,17 @@ void* allocator_alloc(uint64_t size);
 /* Simlar to allocate(), but tries to mark a certain address as occupied.
 *  Arguments:
 *	size - size of requested continous space.
-*	address - address to be marked as occupied.
+*	addr - address to be marked as occupied.
 *  Return value:
-*	address or NULL if given address was already occupied (may be partially) / doesn't physically exist
+*	addr or NULL if given address was already occupied (may be partially) / doesn't physically exist
 */
-void* allocator_alloc_addr(uint64_t size, void* address);
+void* allocator_alloc_addr(uint64_t size, void* addr);
 
 /* Marks requested address as free, performing necessary node insertions and merges.
 *  Arguments:
-*	address - address to be marked as free.
+*	addr - address to be marked as free.
 *	size - size of memory region to be marked as free.
 */
-void allocator_free(void* address, uint64_t size);
+void allocator_free(void* addr, uint64_t size);
 
 #endif

@@ -122,7 +122,7 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 
 	module module_vmemory = {.name = "modload_memory"};
 	void *modfd = kmalloc(_fs.fd_size), *descfd = kmalloc(_fs.fd_size);
-	_fs.open(&_fs, modfd, "vmemory.so", FS_OPEN_READ); // ?
+	_fs.open(&_fs, modfd, "vmemory.so", FS_OPEN_READ); // FIXME
 	_fs.open(&_fs, descfd, "vmemory.dsc", FS_OPEN_READ);
 	uart_printf("loaded memory virtualization module with code %d\r\n", module_load_kernmem(&module_vmemory, &_fs, modfd, descfd));
 	module_add_to_gmt(&module_vmemory);

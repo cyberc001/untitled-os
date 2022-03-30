@@ -16,7 +16,7 @@
 
 typedef struct node node;
 struct node {
-	void* address;
+	void* addr;
 	uint64_t size;
 
 	node *child[2];
@@ -37,8 +37,8 @@ node* alloc_tree_rotate(node* p, int dir);
 
 #define alloc_tree_find_first_fit(size) alloc_tree_find_first_fit_r(alloc_tree.root, size)
 node* alloc_tree_find_first_fit_r(node* n, uint64_t size);
-node* alloc_tree_find(void* address);
-node* alloc_tree_find_containing(void* address, uint64_t size);
+node* alloc_tree_find(void* addr);
+node* alloc_tree_find_containing(void* addr, uint64_t size);
 
 #define alloc_tree_print() alloc_tree_print_r(alloc_tree.root, 0)
 void alloc_tree_print_r(node* n, unsigned depth);
@@ -49,7 +49,7 @@ void alloc_tree_print_r(node* n, unsigned depth);
 void allocator_init(uint64_t memory_limit)
 {
 	alloc_tree.root = kmalloc(sizeof(node));
-	alloc_tree.root->address = (void*)0;
+	alloc_tree.root->addr = (void*)0;
 	alloc_tree.root->size = memory_limit;
 	alloc_tree.root->child[0] = alloc_tree.root->child[1] = alloc_tree.root->parent = NULL;
 	alloc_tree.root->color = TREE_CLR_BLACK;
@@ -64,7 +64,7 @@ void allocator_init(uint64_t memory_limit)
 	for(unsigned i = 0; i < 10; ++i)
 	{
 		nodes[i] = kmalloc(sizeof(node));
-		nodes[i]->address = raddr[i];
+		nodes[i]->addr = raddr[i];
 		nodes[i]->size = rsize[i];
 		alloc_tree_insert(nodes[i]);
 	}
@@ -89,82 +89,81 @@ void* allocator_alloc(uint64_t size)
 
 	if(n->size == size)
 	{ // perfect fit
-		void* ret = n->address;
+		void* ret = n->addr;
 		alloc_tree_delete(n);
 		return ret;
 	}
 	else
-	{ // n->size > size, shrinking the free space and shifting address up
-		void* ret = n->address;
+	{ // n->size > size, shrinking the free space and shifting addr up
+		void* ret = n->addr;
 		n->size -= size;
-		n->address += size;
+		n->addr += size;
 		return ret;
 	}
 }
 
-void* allocator_alloc_addr(uint64_t size, void* address)
+void* allocator_alloc_addr(uint64_t size, void* addr) // FIXME
 {
-	node* n = alloc_tree_find_containing(address, size);
+	node* n = alloc_tree_find_containing(addr, size);
 	if(!n)
 		return NULL;
 
 	if(n->size == size)
 	{ // perfect fit
 		alloc_tree_delete(n);
-		return address;
+		return addr;
 	}
 	else
-	{ // requested address might be lying somewhere in [n->address; n->address + n->size - size]
+	{ // requested addr might be lying somewhere in [n->addr; n->addr + n->size - size]
 		// splitting the node into 2 parts
-		void *addr1 = n->address, *addr2 = address + size;
-		uint64_t size1 = (uint64_t)(address - n->address), size2 = (uint64_t)(n->address + n->size - address - size);
+		void *addr1 = n->addr, *addr2 = addr + size;
+		uint64_t size1 = (uint64_t)(addr - n->addr), size2 = (uint64_t)(n->addr + n->size - addr - size);
 		alloc_tree_delete(n);
 		if(size1){
 			node* _new = kmalloc(sizeof(node));
-			_new->address = addr1; _new->size = size1;
+			_new->addr = addr1; _new->size = size1;
 			alloc_tree_insert(_new);
 		}
 		if(size2){
 			node* _new = kmalloc(sizeof(node));
-			_new->address = addr2; _new->size = size2;
+			_new->addr = addr2; _new->size = size2;
 			alloc_tree_insert(_new);
 		}
-		alloc_tree_print();
-		return address;
+		return addr;
 	}
 }
 
-node* free_lr(node* n, void* address)
+node* merge_lr(node* n, void* addr)
 {
-	if(n->address + n->size == address)
-		return n;
-
-	if(n->child[TREE_DIR_LEFT]) { node* nn = free_lr(n->child[TREE_DIR_LEFT], address); if(nn) return nn; }
-	if(n->child[TREE_DIR_RIGHT]) { node* nn = free_lr(n->child[TREE_DIR_RIGHT], address); if(nn) return nn; }
-
+	while(n){
+		if(n->addr + n->size == addr)
+			return n;
+		int dir = addr < n->addr + n->size ? TREE_DIR_LEFT : TREE_DIR_RIGHT;
+		n = n->child[dir];
+	}
 	return NULL;
 }
-node* free_rr(node* n, void* address, uint64_t size)
+node* merge_rr(node* n, void* addr, uint64_t size)
 {
-	if(address + size == n->address)
-		return n;
-
-	if(n->child[TREE_DIR_LEFT]) { node* nn = free_rr(n->child[TREE_DIR_LEFT], address, size); if(nn) return nn; }
-	if(n->child[TREE_DIR_RIGHT]) { node* nn = free_rr(n->child[TREE_DIR_RIGHT], address, size); if(nn) return nn; }
-
+	while(n){
+		if(addr + size == n->addr)
+			return n;
+		int dir = addr + size < n->addr ? TREE_DIR_LEFT : TREE_DIR_RIGHT;
+		n = n->child[dir];
+	}
 	return NULL;
 }
-void allocator_free(void* address, uint64_t size)
+void allocator_free(void* addr, uint64_t size)
 {
 	node* _new = kmalloc(sizeof(node));
-	_new->address = address; _new->size = size;
+	_new->addr = addr; _new->size = size;
 	alloc_tree_insert(_new);
 
-	node* merge_l = free_lr(_new->child[TREE_DIR_LEFT], address);
-	node* merge_r = free_rr(_new->child[TREE_DIR_RIGHT], address, size);
+	node* merge_l = _new->child[TREE_DIR_LEFT] ? merge_lr(_new->child[TREE_DIR_LEFT], addr) : NULL;
+	node* merge_r = _new->child[TREE_DIR_RIGHT] ? merge_rr(_new->child[TREE_DIR_RIGHT], addr, size) : NULL;
 
 	if(merge_l){
-		_new->address = merge_l->address;
+		_new->addr = merge_l->addr;
 		_new->size += merge_l->size;
 		alloc_tree_delete(merge_l);
 	}
@@ -172,6 +171,7 @@ void allocator_free(void* address, uint64_t size)
 		_new->size += merge_r->size;
 		alloc_tree_delete(merge_r);
 	}
+	alloc_tree_print();
 }
 
 
@@ -190,9 +190,10 @@ void alloc_tree_insert(node* n)
 
 	while(root)
 	{
-		int dir = n->address < root->address ? TREE_DIR_LEFT : TREE_DIR_RIGHT;
+		int dir = n->addr < root->addr ? TREE_DIR_LEFT : TREE_DIR_RIGHT;
 		if(!root->child[dir]){
 			root->child[dir] = n;
+			n->child[0] = n->child[1] = NULL;
 			alloc_tree_insertp(n, root, dir);
 			return;
 		}
@@ -354,27 +355,27 @@ void alloc_tree_delete(node *n)
 			// n has only 1 child
 			if(n == alloc_tree.root)
 			{ // replace n with it's child if n == root
-				n->address = u->address; n->size = u->size;
+				n->addr = u->addr; n->size = u->size;
 				n->child[TREE_DIR_LEFT] = n->child[TREE_DIR_RIGHT] = NULL;
 				kfree(u);
 			}
 			else
 			{ // delete n from the tree and move u up
 				p->child[TREE_DIR_CHILD(n)] = u;
-				kfree(n);
 				u->parent = p;
 				if(un_is_black)
 					alloc_tree_delete_fixbb(n);
 				else
 					u->color = TREE_CLR_BLACK;
+				kfree(n);
 			}
 			return;
 		}
 		// swap u and n
 		node tmp;
-		tmp.size = n->size; tmp.address = n->address;
-		n->size = u->size; n->address = u->address;
-		u->size = tmp.size; u->address = tmp.address;
+		tmp.size = n->size; tmp.addr = n->addr;
+		n->size = u->size; n->addr = u->addr;
+		u->size = tmp.size; u->addr = tmp.addr;
 		n = u;
 	}
 }
@@ -392,25 +393,25 @@ node* alloc_tree_find_first_fit_r(node* n, uint64_t size)
 
 	return NULL;
 }
-/* BT traversal by address */
-node* alloc_tree_find(void* address)
+/* BT traversal by addr */
+node* alloc_tree_find(void* addr)
 {
 	node* cur = alloc_tree.root;
 	while(cur){
-		if(cur->address == address)
+		if(cur->addr == addr)
 			return cur;
-		cur = (address < cur->address) ? cur->child[TREE_DIR_LEFT] : cur->child[TREE_DIR_RIGHT];
+		cur = (addr < cur->addr) ? cur->child[TREE_DIR_LEFT] : cur->child[TREE_DIR_RIGHT];
 	}
 	return NULL;
 }
-/* BT traversal by address, but the criteria is address + size interval lying in free space */
-node* alloc_tree_find_containing(void* address, uint64_t size)
+/* BT traversal by addr, but the criteria is addr + size interval lying in free space */
+node* alloc_tree_find_containing(void* addr, uint64_t size)
 {
 	node* cur = alloc_tree.root;
 	while(cur){
-		if(address >= cur->address && address + size <= cur->address + cur->size)
+		if(addr >= cur->addr && addr + size <= cur->addr + cur->size)
 			return cur;
-		cur = (address < cur->address) ? cur->child[TREE_DIR_LEFT] : cur->child[TREE_DIR_RIGHT];
+		cur = (addr < cur->addr) ? cur->child[TREE_DIR_LEFT] : cur->child[TREE_DIR_RIGHT];
 	}
 	return NULL;
 }
@@ -421,11 +422,11 @@ node* alloc_tree_rotate(node* p, int dir)
 {
 	node* g = p->parent;
 	node* s = p->child[1 - dir];
-	node* c = s->child[dir];
+	node* c = s ? s->child[dir] : NULL;
 
 	p->child[1 - dir] = c;
 	if(c) c->parent = p;
-	s->child[dir] = p;
+	if(s) s->child[dir] = p;
 	p->parent = s;
 	s->parent = g;
 
@@ -443,7 +444,7 @@ void alloc_tree_print_r(node* n, unsigned depth)
 		uart_printf("--\r\n"); // it's a leaf
 		return;
 	}
-	uart_printf("%c %p $ %p\r\n", n->color == TREE_CLR_BLACK ? 'B' : 'R', n->address, (void*)n->size);
+	uart_printf("%c %p $ %p\r\n", n->color == TREE_CLR_BLACK ? 'B' : 'R', n->addr, (void*)n->size);
 
 	alloc_tree_print_r(n->child[TREE_DIR_LEFT], depth + 1);
 	alloc_tree_print_r(n->child[TREE_DIR_RIGHT], depth + 1);
