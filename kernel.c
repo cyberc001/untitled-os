@@ -122,7 +122,7 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 
 	module module_vmemory = {.name = "modload_memory"};
 	void *modfd = kmalloc(_fs.fd_size), *descfd = kmalloc(_fs.fd_size);
-	_fs.open(&_fs, modfd, "vmemory.so", FS_OPEN_READ); // FIXME
+	_fs.open(&_fs, modfd, "vmemory.so", FS_OPEN_READ);
 	_fs.open(&_fs, descfd, "vmemory.dsc", FS_OPEN_READ);
 	uart_printf("loaded memory virtualization module with code %d\r\n", module_load_kernmem(&module_vmemory, &_fs, modfd, descfd));
 	module_add_to_gmt(&module_vmemory);
@@ -135,8 +135,24 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 			memory_limit = mmap_struct_tag->memmap[i].base + mmap_struct_tag->memmap[i].length;
 	uart_printf("Available memory: %lu\r\n", memory_limit);
 
+	uart_printf("Initializing memory virtualization module\r\n");
 	int(*vmemory_init)() = elf_get_function_module(&module_vmemory, "init");
 	vmemory_init(memory_limit);
+
+	uart_printf("Identity mapping the module loader:\r\n");
+	int(*vmemory_map_phys)() = elf_get_function_module(&module_vmemory, "map_phys");
+	void* kmem_heap_end = kmem_get_heap_end();
+	vmemory_map_phys(KERN_HEAP_BASE, KERN_HEAP_BASE, (kmem_heap_end - KERN_HEAP_BASE + (2 * 1024 * 1024 - 1)) / (2 * 1024 * 1024));
+
+	// map kernel image:
+	struct stivale2_struct_tag_kernel_base_address *kbase_tag = stivale2_get_tag(stivale2_struct, STIVALE2_STRUCT_TAG_KERNEL_BASE_ADDRESS_ID);
+	vmemory_map_phys((void*)kbase_tag->virtual_base_address, (void*)kbase_tag->physical_base_address, 10, 0);
+
+	uart_printf("Enabling memory virtualization module\r\n");
+	int(*vmemory_enable)() = elf_get_function_module(&module_vmemory, "enable");
+	vmemory_enable();
+
+	uart_printf("Success!\r\n");
 
 	/*module module_memory = {.name = "modload_memory"};
 	void* fd = kmalloc(_fs.fd_size);

@@ -218,7 +218,6 @@ static int elf_relocate_symbol_addend(elf_header* header, const char** dependenc
 			*target_rel = (uint64_t)(*target_rel + symval + (uint64_t)header);
 			break;
 		case ELF_RELOC_TYPE_JMP_SLOT: // symbol (S)
-			//uart_printf("%p %p %p\r\n", (void*)*target_rel, (void*)symval, (void*)header);
 			if(err == ELF_HINT_MLOADER_API)
 				*target_rel = symval;
 			else

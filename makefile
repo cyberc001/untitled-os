@@ -9,7 +9,7 @@ CC_INCLUDE=-Icstdlib -I.
 CC_ARCH_FLAG=-D CPU_I386
 CC_BIT_FLAG=-D CPU_64BIT
 CC_INTERNAL_FLAGS=-std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -mabi=sysv -mno-80387 -mno-mmx -mno-3dnow -mno-sse -mno-sse2 -mno-red-zone -mcmodel=kernel -MMD
-CC_FLAGS= -g -O2 -Wall -Wextra -fms-extensions $(CC_ARCH_FLAG) $(CC_BIT_FLAG)
+CC_FLAGS= -g -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -fms-extensions $(CC_ARCH_FLAG) $(CC_BIT_FLAG)
 CC=x86_64-elf-gcc $(CC_INCLUDE) $(CC_FLAGS) $(CC_INTERNAL_FLAGS)
 CC_MODULE=x86_64-elf-gcc $(CC_INCLUDE) $(CC_FLAGS) -ffreestanding
 LD_INTERNAL_FLAGS=-nostdlib -static
@@ -84,8 +84,8 @@ clean:
 run:
 	qemu-system-x86_64 -cdrom iso/myos.iso \
 			 -drive id=disk,file=atest.img,if=ide,cache=none,format=raw \
+			 -d int \
 			 #-S -gdb tcp::1234
-			 #-d int \
 
 # test image
 img_refresh:

@@ -23,22 +23,32 @@
 #define PFLAG_PAT		(1 << 12)
 #define PFLAG_XD		(1 << 63)	// if 1, does not allow instruction fetches from this page (if CPU supports it)
 
-// PDPT entry:
-#define PDPTE_PD_GET_PHYSADDR(e)		((void*)( ((e) >> 12) & ( ((uint64_t)1 << (MAX_PHYS_ADDR - 12)) - 1) ))
-#define PDPTE_PD_SET_PHYSADDR(e, addr)		{ (e) |= (uint64_t)(addr) << 12; }
-#define PDPTE_SIZE				(1024 * 1024 * 1024)		// 1 GiB
-#define PDPT_ENTRIES				4
-#define PDPT_ALIGN				32
 
-// PD entry:
-#define PDE_2MBPAGE_GET_PHYSADDR(e)		((void*)( ((e) >> 21) & ( ((uint64_t)1 << (MAX_PHYS_ADDR - 21)) - 1) ))
-#define PDE_2MBPAGE_SET_PHYSADDR(e, addr)	{ (e) |= (uint64_t)(addr) << 21; }
-#define PDE_SIZE				(2 * 1024 * 1024)		// 2 MiB
-#define PD_ALIGN				4096
+#define GET_BITS_LAST(expr, amt)		((uint64_t)(expr) & ((1 << (amt)) - 1))
+#define GET_BITS(expr, start, end)		GET_BITS_LAST((uint64_t)(expr) >> (start), (end) - (start))
+
+#define SET_BITS(expr, bits, start)		{ (expr) = (__typeof__(expr))((uint64_t)(expr) | (bits) << (start)); }
+
+// PML4:
+uint64_t* pml4;
+#define PML4_ENTRIES				512
+#define PML4_ALIGN				4096
+#define GET_PML4E(addr)				(uint64_t*)((uint64_t)pml4 | (GET_BITS(addr, 39, 48) << 3))
+#define SET_PDPT(pml4e, paddr)			SET_BITS(pml4e, paddr, 0) // 51:12
+
+// PDPT:
+#define PDPT_ENTRIES				512
+#define PDPT_ALIGN				4096
+#define GET_PDPTE(addr, pml4e)			(uint64_t*)( ((pml4e) & 0xFFFFFFFFFF000) | (GET_BITS(addr, 30, 39) << 3))
+#define SET_PD(pdpte, paddr)			SET_BITS(pdpte, paddr, 0) // 51:12
+
+// PD:
 #define PD_ENTRIES				512
+#define PD_ALIGN				4096
+#define GET_PDE(addr, pdpte)			(uint64_t*)( ((pdpte) & 0xFFFFFFFFFF000) | (GET_BITS(addr, 21, 30) << 3))
 
-
-uint64_t* pdpt;		// Page Directory Pointer Table; allocated by kernmem.h functions in order to reside in lower half
+#define SET_PDE_PHYSADDR(pde, paddr)		SET_BITS(pde, paddr, 0) // 51:21
+#define GET_PDE_PHYSADDR(addr, pde)		(void*)( ((pde) & 0xFFFFFFFE00000) | GET_BITS(addr, 0, 21))
 
 
 // Functions for modifying page structures
@@ -52,36 +62,46 @@ uint64_t* pdpt;		// Page Directory Pointer Table; allocated by kernmem.h functio
 */
 static uint64_t* make_entry(void* vaddr)
 {
-	uint64_t* pdpt_e = pdpt + (uint64_t)vaddr / (uint64_t)PDPTE_SIZE;
-	if(!(*pdpt_e & PFLAG_PRESENT)){ // allocate space for a page directory
-		uint64_t* new_pd = kmalloc_align(sizeof(uint64_t) * PD_ENTRIES, PD_ALIGN);
-		if( new_pd > (uint64_t*)((uint64_t)1 << ((MAX_PHYS_ADDR - 12) - 1)) || !new_pd){
-			if(new_pd)
-				kfree(new_pd);
+	uint64_t* pml4e = GET_PML4E(vaddr);
+	if(!(*pml4e & PFLAG_PRESENT)){ // allocate space for a page directory pointer table
+		uint64_t* new_pdpt = kmalloc_align(sizeof(uint64_t) * PDPT_ENTRIES, PDPT_ALIGN);
+		if(!new_pdpt)
 			return NULL;
-		}
-		for(uint64_t i = 0; i < PD_ENTRIES; ++i)
-			new_pd[i] = 0x0;
-		PDPTE_PD_SET_PHYSADDR(*pdpt_e, new_pd);
-		*pdpt_e |= PFLAG_PRESENT;
+		for(uint64_t i = 0; i < PDPT_ENTRIES; ++i)
+			new_pdpt[i] = 0x0;
+		SET_PDPT(*pml4e, (uint64_t)new_pdpt);
+		*pml4e |= PFLAG_PRESENT;
 	}
 
-	uint64_t* pd = PDPTE_PD_GET_PHYSADDR(*pdpt_e);
-	uint64_t* pd_e = pd + ((uint64_t)vaddr % PDPTE_SIZE / PDE_SIZE);
-	return pd_e;
+	uint64_t* pdpte = GET_PDPTE(vaddr, *pml4e);
+	if(!(*pdpte & PFLAG_PRESENT)){ // allocate space for a page directory
+		uint64_t* new_pd = kmalloc_align(sizeof(uint64_t) * PD_ENTRIES, PD_ALIGN);
+		if(!new_pd)
+			return NULL;
+		for(uint64_t i = 0; i < PD_ENTRIES; ++i)
+			new_pd[i] = 0x0;
+		SET_PD(*pdpte, (uint64_t)new_pd);
+		*pdpte |= PFLAG_PRESENT;
+	}
+
+	uint64_t* pde = GET_PDE(vaddr, *pdpte);
+	*pde |= PFLAG_PSIZE;
+	return pde;
 }
 /* Gets entry for specified virtual address.
 *  Return value:
-*	Returns a pointer to corresponding entry, or NULL if it's not present.
+*	Returns a pointer to corresponding entry, or NULL if any of indirection tables are not present.
 */
 static uint64_t* get_entry(void* vaddr)
 {
-	uint64_t* pdpt_e = pdpt + (uint64_t)vaddr / (uint64_t)PDPTE_SIZE;
-	if(!(*pdpt_e & PFLAG_PRESENT))
+	uint64_t* pml4e = GET_PML4E(vaddr);
+	if(!(*pml4e & PFLAG_PRESENT))
 		return NULL;
-	uint64_t* pd = PDPTE_PD_GET_PHYSADDR(*pdpt_e);
-	uint64_t* pd_e = pd + ((uint64_t)vaddr % PDPTE_SIZE / PDE_SIZE);
-	return pd_e;
+	uint64_t* pdpte = GET_PDPTE(vaddr, *pml4e);
+	if(!(*pdpte & PFLAG_PRESENT))
+		return NULL;
+	uint64_t* pde = GET_PDE(vaddr, *pdpte);
+	return pde;
 }
 
 
@@ -89,41 +109,54 @@ static uint64_t* get_entry(void* vaddr)
 
 int init(uint64_t mem_limit)
 {
+	//pml4 = (void*)0x72bd000;
+	//uart_printf("GET_ENTRY: %p\r\n", get_entry(0xffff80400000));
+	//while(1) {}
+
 	allocator_init(mem_limit);
 
 	// map a page at NULL to handle allocator errors (it returns 0 if it runs out of physical memory)
 	allocator_alloc_addr(VMEM_PAGE_SIZE, NULL);
 
 	// allocate space for PDPT and mark all pd pointers as not present
-	pdpt = kmalloc_align(sizeof(uint64_t) * PDPT_ENTRIES, PDPT_ALIGN);
-	for(uint64_t i = 0; i < PDPT_ENTRIES; ++i)
-		pdpt[i] = 0x0;
+	pml4 = kmalloc_align(sizeof(uint64_t) * PML4_ENTRIES, PML4_ALIGN);
+	if(!pml4)
+		return VMEM_ERR_NOSPACE;
+	for(uint64_t i = 0; i < PML4_ENTRIES; ++i)
+		pml4[i] = 0x0;
 
-	uart_printf("map_alloc test: %d\r\n", map_alloc((void*)0xdeadbeef, 1, 0));
-	uart_printf("map_alloc repeat test: %d\r\n", map_alloc((void*)0xdeadbeef, 1, 0));
+	/*uart_printf("map_alloc test: %d\r\n", map_alloc((void*)0xdeadbeef, 1, 0));
+	uart_printf("map_alloc repeat test: %d\r\n", map_alloc((void*)0xdeadbeef, 1, 0));*/
 
-	uart_printf("map_phys test on null page: %d\r\n", map_phys((void*)0x0, (void*)0x0, 1, 0));
-	uart_printf("map_phys test on 0xd0000000: %d\r\n", map_phys((void*)0xd0000000, (void*)0xd0000000, 1, 0));
-	uart_printf("unmap test on 0xd0000000: %d\r\n", unmap((void*)0xd0000000, 1));
-	uart_printf("map_phys test on 0xd0000000: %d\r\n", map_phys((void*)0xd0000000, (void*)0xd0000000, 1, 0));
-
+	//uart_printf("map_phys test on null page: %d\r\n", map_phys((void*)0x0, (void*)0x0, 1, 0));
+	//uart_printf("map_phys test on 0xffff80000000: %d\r\n", map_phys((void*)0xffff80000000, (void*)0xc0000000, 1, 0));
+	//uart_printf("unmap test on 0xd0000000: %d\r\n", unmap((void*)0xd0000000, 1));
+	//uart_printf("map_phys test on 0xd0000000: %d\r\n", map_phys((void*)0xd0000000, (void*)0xd0000000, 1, 0));*/
 	return 0;
 }
 
+int enable()
+{
+	// load PML4 into CR3:
+	asm volatile("mov %0, %%cr3" :: "r" (pml4));
+	return 0;
+}
+
+
 int map_alloc(void* vaddr, uint64_t psize, int flags)
 {
-	void* paddr = allocator_alloc(psize * VMEM_PAGE_SIZE);
+	void* paddr = allocator_alloc(psize * VMEM_PAGE_SIZE); // TODO: not always maintain continuity (configurable through flags)
 	if(!paddr)
 		return VMEM_ERR_NOSPACE;
 
-	uint64_t* pe = make_entry(vaddr);
-	if(!pe)
+	uint64_t* pde = make_entry(vaddr);
+	if(!pde)
 		return VMEM_ERR_NOSPACE;
-	if(*pe & PFLAG_PRESENT)
+	if(*pde & PFLAG_PRESENT)
 		return VMEM_ERR_VIRT_OCCUPIED;
 
-	PDE_2MBPAGE_SET_PHYSADDR(*pe, (uint64_t)paddr >> 21);
-	*pe |= PFLAG_PRESENT;
+	SET_PDE_PHYSADDR(*pde, (uint64_t)paddr);
+	*pde |= PFLAG_PRESENT;
 
 	return 0;
 }
@@ -134,26 +167,27 @@ int map_phys(void* vaddr, void* paddr, uint64_t psize, int flags)
 	if(!paddr)
 		return VMEM_ERR_PHYS_OCCUPIED;
 
-	uint64_t* pe = make_entry(vaddr);
-	if(!pe)
-		return VMEM_ERR_NOSPACE;
-	if(*pe & PFLAG_PRESENT)
-		return VMEM_ERR_VIRT_OCCUPIED;
+	for(; psize; --psize, vaddr += VMEM_PAGE_SIZE, paddr += VMEM_PAGE_SIZE){
+		uart_printf("map_phys: %p --> %p\r\n", vaddr, paddr);
+		uint64_t* pde = make_entry(vaddr);
+		if(!pde)
+			return VMEM_ERR_NOSPACE;
+		if(*pde & PFLAG_PRESENT)
+			return VMEM_ERR_VIRT_OCCUPIED;
 
-	PDE_2MBPAGE_SET_PHYSADDR(*pe, (uint64_t)paddr >> 21);
-	uart_printf("map_phys::::::%p\r\n", (uint64_t)PDE_2MBPAGE_GET_PHYSADDR(*pe) << 21);
-	*pe |= PFLAG_PRESENT;
+		SET_PDE_PHYSADDR(*pde, (uint64_t)paddr);
+		*pde |= PFLAG_PRESENT;
+	}
 	return 0;
 }
 
 int unmap(void* vaddr, uint64_t psize)
 {
-	uint64_t* pe = get_entry(vaddr);
-	if(!pe)
+	uint64_t* pde = get_entry(vaddr);
+	if(!pde)
 		return VMEM_NOT_MAPPED;
 
-	uart_printf("unmap::::::%p\r\n", (void*)((uint64_t)PDE_2MBPAGE_GET_PHYSADDR(*pe) << 21));
-	allocator_free((void*)((uint64_t)PDE_2MBPAGE_GET_PHYSADDR(*pe) << 21), psize * VMEM_PAGE_SIZE);
-	*pe &= ~PFLAG_PRESENT;
+	allocator_free((void*)(GET_PDE_PHYSADDR(vaddr, *pde)), psize * VMEM_PAGE_SIZE);
+	*pde &= ~PFLAG_PRESENT;
 	return 0;
 }

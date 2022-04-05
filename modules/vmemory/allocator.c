@@ -102,9 +102,10 @@ void* allocator_alloc(uint64_t size)
 	}
 }
 
-void* allocator_alloc_addr(uint64_t size, void* addr) // FIXME
+void* allocator_alloc_addr(uint64_t size, void* addr)
 {
 	node* n = alloc_tree_find_containing(addr, size);
+	alloc_tree_print();
 	if(!n)
 		return NULL;
 

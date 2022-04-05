@@ -23,6 +23,14 @@ void kmem_init()
 	// initializing the dummy node, which would store the 1st element of the list
 	kmem_head->next = kmem_head->prev = NULL;
 }
+void* kmem_get_heap_end()
+{
+	kmem_node* it = kmem_head;
+	while(it->next)
+		it = it->next;
+	return (void*)it + sizeof(kmem_node) + it->sz;
+}
+
 void print_kmem_llist()
 {
 	kmem_node* it = kmem_head;
@@ -45,8 +53,8 @@ void* kmalloc_align(size_t size, size_t align)
 		// calculate the gap between current and next memory node
 		void* gap_beg = (void*)it + sizeof(kmem_node) + it->sz;
 		void* gap_end = it->next;
-		if((uint64_t)gap_beg % align) // account for alignment
-			gap_beg += align - (uint64_t)gap_beg % align;
+		if(((uint64_t)gap_beg + sizeof(kmem_node)) % align) // account for alignment
+			gap_beg += align - ((uint64_t)gap_beg + sizeof(kmem_node)) % align;
 		if(gap_end > gap_beg){
 			size_t gap = gap_end - gap_beg;
 			if(gap >= size + sizeof(kmem_node)){
@@ -66,8 +74,8 @@ void* kmalloc_align(size_t size, size_t align)
 
 	// if no large enough gap was found, mark space after the last (thus farthest in the memory) node allocated
 	void* nblk = (void*)it + sizeof(kmem_node) + it->sz;
-	if((uint64_t)nblk % align)
-		nblk += align - (uint64_t)nblk % align;
+	if(((uint64_t)nblk + sizeof(kmem_node)) % align)
+		nblk += align - ((uint64_t)nblk + sizeof(kmem_node)) % align;
 	it->next = nblk;
 	it->next->sz = size;
 	it->next->next = NULL;
