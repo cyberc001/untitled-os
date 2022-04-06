@@ -3,6 +3,7 @@
 #include <stivale2.h>
 
 #include "dev/uart.h"
+#include "log/boot_log.h"
 
 #include "kernlib/kernmem.h"
 #include "kernlib/kerndefs.h"
@@ -79,84 +80,103 @@ void* stivale2_get_tag(struct stivale2_struct* stivale2_struct, uint64_t id)
 // First entry point
 void _start(struct stivale2_struct* stivale2_struct)
 {
-	struct stivale2_struct_tag_terminal* term_str_tag;
-	term_str_tag = stivale2_get_tag(stivale2_struct, STIVALE2_STRUCT_TAG_TERMINAL_ID);
-	if(!term_str_tag)
-		uart_printf("Couldn't find terminal tag!");
-	//void *term_write_ptr = (void *)term_str_tag->term_write;
-	//void (*term_write)(const char *string, size_t length) = term_write_ptr;
-	//term_write("Hello World", 11);
-
 	kernel_main(stivale2_struct);
-
 	for (;;)
         	asm ("hlt");
 }
 
+void boot_log_write_stub(const char* str, size_t s){}
+
 void kernel_main(struct stivale2_struct* stivale2_struct)
 {
-	uart_printf("Initializing PCI\r\n");
+	struct stivale2_struct_tag_terminal* term_str_tag;
+	term_str_tag = stivale2_get_tag(stivale2_struct, STIVALE2_STRUCT_TAG_TERMINAL_ID);
+	if(!term_str_tag)
+		uart_printf("Couldn't find terminal tag, can't initialize boot logger\r\n");
+	boot_log_set_write_func((void*)term_str_tag->term_write);
+
+	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Initializing PCI");
 	pci_setup();
+	boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Initializing PCI");
 
+	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Generic CPU initialization");
 	cpu_interrupt_set(0);
-	uart_printf("** Generic CPU initialization **\r\n");
 	cpu_init();
-	uart_printf("** End of genertic CPU initializtaion **\r\n");
-	uart_printf("Entering protected mode\r\n");
+	boot_log_set_write_func(boot_log_write_stub);
+	boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Generic CPU initialization");
+
+	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Enterting protected mode");
 	cpu_mode_set(CPU_MODE_PROTECTED);
-	uart_printf("Initializing interrupts\r\n");
+	boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Enterting protected mode");
+	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Initializing interrupts");
 	cpu_interrupt_init();
-	uart_printf("Enabling interrupts\r\n");
 	cpu_interrupt_set(1);
+	boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Initializing interrupts");
 
-	uart_printf("Probing ATA decives\r\n");
+	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Probing ATA decives");
 	ata_drive drives[4];
-	uart_printf("%lu ATA drives detected\r\n", ata_probe(drives));
+	unsigned ata_devs = ata_probe(drives);
+	boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "ATA devices detected: %u", ata_devs);
 
+	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Detecting file system on drive 0");
 	file_system _fs;
-	uart_printf("Detecting file system of drive 0\r\n");
 	fs_scan(&_fs, &drives[0]);
-	uart_printf("drive 0 file system: %s\r\n", _fs.name);
+	boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Detecting file system on drive 0: %s", _fs.name);
 
 	module_init_api();
 
+	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Loading memory virtualization module");
 	module module_vmemory = {.name = "modload_memory"};
 	void *modfd = kmalloc(_fs.fd_size), *descfd = kmalloc(_fs.fd_size);
 	_fs.open(&_fs, modfd, "vmemory.so", FS_OPEN_READ);
 	_fs.open(&_fs, descfd, "vmemory.dsc", FS_OPEN_READ);
-	uart_printf("loaded memory virtualization module with code %d\r\n", module_load_kernmem(&module_vmemory, &_fs, modfd, descfd));
+	int err = module_load_kernmem(&module_vmemory, &_fs, modfd, descfd);
+	if(err)
+		boot_log_printf_status(BOOT_LOG_STATUS_FAIL, "Loading memory virtualization module: error code %d", err);
+	else
+		boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Loading memory virtualization module");
 	module_add_to_gmt(&module_vmemory);
-	uart_puts("\r\n");
 
 	struct stivale2_struct_tag_memmap *mmap_struct_tag = stivale2_get_tag(stivale2_struct, STIVALE2_STRUCT_TAG_MEMMAP_ID);
 	uint64_t memory_limit = 0;
 	for(uint64_t i = 0; i < mmap_struct_tag->entries; ++i)
 		if(mmap_struct_tag->memmap[i].base + mmap_struct_tag->memmap[i].length > memory_limit)
 			memory_limit = mmap_struct_tag->memmap[i].base + mmap_struct_tag->memmap[i].length;
-	uart_printf("Available memory: %lu\r\n", memory_limit);
 
-	uart_printf("Initializing memory virtualization module\r\n");
+	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Initializing memory virtualization module");
 	int(*vmemory_init)() = elf_get_function_module(&module_vmemory, "init");
-	vmemory_init(memory_limit);
+	err = vmemory_init(memory_limit);
+	if(err)
+		boot_log_printf_status(BOOT_LOG_STATUS_FAIL, "Initializing memory virtualization module: error code %d", err);
+	else
+		boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Initializing memory virtualization module");
 
 	uint64_t(*vmemory_get_mem_unit_size)() = elf_get_function_module(&module_vmemory, "get_mem_unit_size");
 	uint64_t vmemory_mem_unit_size = vmemory_get_mem_unit_size();
 
-	uart_printf("Identity mapping the module loader\r\n");
+	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Identity mapping module loader");
 	int(*vmemory_map_phys)() = elf_get_function_module(&module_vmemory, "map_phys");
 	void* kmem_heap_end = kmem_get_heap_end();
-	vmemory_map_phys(KERN_HEAP_BASE, KERN_HEAP_BASE, (kmem_heap_end - KERN_HEAP_BASE + (vmemory_mem_unit_size - 1)) / (vmemory_mem_unit_size));
+	err = vmemory_map_phys(KERN_HEAP_BASE, KERN_HEAP_BASE, (kmem_heap_end - KERN_HEAP_BASE + (vmemory_mem_unit_size - 1)) / (vmemory_mem_unit_size));
+	if(err)
+		boot_log_printf_status(BOOT_LOG_STATUS_FAIL, "Identity mapping module loader: error code %d", err);
+	else{
+		struct stivale2_struct_tag_kernel_base_address *kbase_tag = stivale2_get_tag(stivale2_struct, STIVALE2_STRUCT_TAG_KERNEL_BASE_ADDRESS_ID);
+		err = vmemory_map_phys((void*)kbase_tag->virtual_base_address, (void*)kbase_tag->physical_base_address, (20 * 1024 * 1024) / vmemory_mem_unit_size, 0);
+		if(err)
+			boot_log_printf_status(BOOT_LOG_STATUS_FAIL, "Identity mapping module loader: error code %d", err);
+		else
+			boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Identity mapping module loader");
+	}
 
-	// map kernel image:
-	struct stivale2_struct_tag_kernel_base_address *kbase_tag = stivale2_get_tag(stivale2_struct, STIVALE2_STRUCT_TAG_KERNEL_BASE_ADDRESS_ID);
-	vmemory_map_phys((void*)kbase_tag->virtual_base_address, (void*)kbase_tag->physical_base_address, (20 * 1024 * 1024) / vmemory_mem_unit_size, 0);
-
-	uart_printf("Enabling memory virtualization module\r\n");
+	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Enabling memory virtualization module");
 	int(*vmemory_enable)() = elf_get_function_module(&module_vmemory, "enable");
-	vmemory_enable();
+	err = vmemory_enable();
+	if(err)
+		boot_log_printf_status(BOOT_LOG_STATUS_FAIL, "Enabling memory virtualization module");
+	else
+		boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Enabling memory virtualization module");
 
 	int(*vmemory_map_alloc)() = elf_get_function_module(&module_vmemory, "map_alloc");
 	kmem_set_map_functions(vmemory_map_alloc, vmemory_get_mem_unit_size);
-
-	uart_printf("Success!\r\n");
 }

@@ -1,13 +1,11 @@
 #include "ata.h"
 
-#include "../cstdlib/string.h"
-#include "../cpu/cpu_io.h"
+#include "cstdlib/string.h"
+#include "cpu/cpu_io.h"
 
-#include "../cpu/pci.h"
+#include "cpu/pci.h"
 
 #include "pio.h"
-
-#include "../dev/uart.h"
 
 void ata_wait(ata_drive* drive)
 {
@@ -175,7 +173,6 @@ size_t ata_probe(ata_drive drives_out[4])
 		switch(drives_out[i].type)
 		{
 			case ATA_DEVICE_PATA:
-			uart_printf("detected PATA drive #%lu\r\n", i);
 			pio_setup_drive(&drives_out[i]);
 			++dev_detected;
 			break;
