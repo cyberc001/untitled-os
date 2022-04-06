@@ -6,7 +6,15 @@
 #include "dev/uart.h"
 #include "cstdlib/string.h"
 
-// Basic heap memory implementation.
+// Basic kernel heap memory implementation.
+
+int (*vmemory_map_alloc)(void*, uint64_t, int) = NULL;
+uint64_t (*vmemory_get_mem_unit_size)() = NULL;
+void kmem_set_map_functions(int (*alloc_func)(void*, uint64_t, int), uint64_t (*mem_unit_size_func)())
+{
+	vmemory_map_alloc = alloc_func;
+	vmemory_get_mem_unit_size = mem_unit_size_func;
+}
 
 // Basic linked list implementation
 typedef struct kmem_node kmem_node;
@@ -17,6 +25,7 @@ struct kmem_node
 	struct kmem_node* prev;
 };
 kmem_node* kmem_head = (kmem_node*)KERN_HEAP_BASE;
+void* occupied_to = KERN_HEAP_BASE; // upper bound of memory currently mapped
 
 void kmem_init()
 {
@@ -25,10 +34,7 @@ void kmem_init()
 }
 void* kmem_get_heap_end()
 {
-	kmem_node* it = kmem_head;
-	while(it->next)
-		it = it->next;
-	return (void*)it + sizeof(kmem_node) + it->sz;
+	return occupied_to;
 }
 
 void print_kmem_llist()
@@ -41,7 +47,6 @@ void print_kmem_llist()
 }
 
 
-// TODO: add restraints on how far kernel memory can go
 void* kmalloc(size_t size)
 {
 	return kmalloc_align(size, 1);
@@ -76,6 +81,15 @@ void* kmalloc_align(size_t size, size_t align)
 	void* nblk = (void*)it + sizeof(kmem_node) + it->sz;
 	if(((uint64_t)nblk + sizeof(kmem_node)) % align)
 		nblk += align - ((uint64_t)nblk + sizeof(kmem_node)) % align;
+	if(nblk + sizeof(kmem_node) + size > occupied_to){
+		if(vmemory_map_alloc){
+			uint64_t mem_unit_size = vmemory_get_mem_unit_size();
+			void* occupied_to_aligned = occupied_to - (uint64_t)occupied_to % mem_unit_size;
+			if((uint64_t)((nblk + sizeof(kmem_node) + size) - occupied_to_aligned) > mem_unit_size)
+				vmemory_map_alloc(occupied_to_aligned + mem_unit_size, 1, 0);
+		}
+		occupied_to = nblk + sizeof(kmem_node) + size;
+	}
 	it->next = nblk;
 	it->next->sz = size;
 	it->next->next = NULL;

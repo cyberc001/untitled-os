@@ -29,6 +29,29 @@ static struct {
 } alloc_tree;
 
 
+// Memory pool, since allocator uses module loader memory allocation, which relies on paging, which relies on allocator
+#define NODE_MEM_POOL_SIZE	112	// doubled rough estimate, considering that there are 48 bits adressable: log_2(memory size / 2 MB (page size)) * 2 ~ 56
+static node* node_mem_pool[NODE_MEM_POOL_SIZE];
+static size_t node_mem_pool_i;		// current index into memory pool.
+
+static void node_mem_pool_init()
+{
+	for(size_t i = 0; i < NODE_MEM_POOL_SIZE; ++i)
+		node_mem_pool[i] = kmalloc(sizeof(node));
+}
+static node* alloc_node()
+{
+	if(node_mem_pool_i++ >= NODE_MEM_POOL_SIZE / 2){
+		for(size_t i = node_mem_pool_i; i < NODE_MEM_POOL_SIZE; ++i){ // can't use memmove: it requires memory allocation (at least in a naive implementation)
+			node_mem_pool[i - node_mem_pool_i] = node_mem_pool[i];
+			node_mem_pool[i] = kmalloc(sizeof(node));
+		}
+		node_mem_pool_i = 0;
+	}
+	return node_mem_pool[node_mem_pool_i];
+}
+
+
 void alloc_tree_insert(node* n);
 void alloc_tree_insertp(node* n, node* p, int dir);
 void alloc_tree_delete(node *n);
@@ -48,36 +71,12 @@ void alloc_tree_print_r(node* n, unsigned depth);
 
 void allocator_init(uint64_t memory_limit)
 {
-	alloc_tree.root = kmalloc(sizeof(node));
+	node_mem_pool_init();
+	alloc_tree.root = alloc_node();
 	alloc_tree.root->addr = (void*)0;
 	alloc_tree.root->size = memory_limit;
 	alloc_tree.root->child[0] = alloc_tree.root->child[1] = alloc_tree.root->parent = NULL;
 	alloc_tree.root->color = TREE_CLR_BLACK;
-
-	/*uart_printf("RB tree insert test:\r\n");
-	alloc_tree_print();
-
-	void* raddr[10] = {(void*)0x182131, (void*)0x64812, (void*)0x568192, (void*)0x581921, (void*)0x4819185, (void*)0x913852, (void*)0x1288521, (void*)0x53818, (void*)0x543811, (void*)0x384821};
-	uint64_t rsize[10] = {678381, 195821, 21948, 218412, 64831, 31852, 68832, 128543, 321818, 538181};
-	node* nodes[10];
-
-	for(unsigned i = 0; i < 10; ++i)
-	{
-		nodes[i] = kmalloc(sizeof(node));
-		nodes[i]->addr = raddr[i];
-		nodes[i]->size = rsize[i];
-		alloc_tree_insert(nodes[i]);
-	}
-
-	uart_printf("-------------insert-------------\r\n");
-	alloc_tree_print();
-
-	for(int i = 9; i >= 0; --i){
-		node* todel = alloc_tree_find(raddr[i]);
-		uart_printf("-------------delete %p-------------\r\n", raddr[i]);
-		alloc_tree_delete(todel);
-		alloc_tree_print();
-	}*/
 }
 
 
@@ -105,7 +104,6 @@ void* allocator_alloc(uint64_t size)
 void* allocator_alloc_addr(uint64_t size, void* addr)
 {
 	node* n = alloc_tree_find_containing(addr, size);
-	alloc_tree_print();
 	if(!n)
 		return NULL;
 
@@ -121,12 +119,12 @@ void* allocator_alloc_addr(uint64_t size, void* addr)
 		uint64_t size1 = (uint64_t)(addr - n->addr), size2 = (uint64_t)(n->addr + n->size - addr - size);
 		alloc_tree_delete(n);
 		if(size1){
-			node* _new = kmalloc(sizeof(node));
+			node* _new = alloc_node();
 			_new->addr = addr1; _new->size = size1;
 			alloc_tree_insert(_new);
 		}
 		if(size2){
-			node* _new = kmalloc(sizeof(node));
+			node* _new = alloc_node();
 			_new->addr = addr2; _new->size = size2;
 			alloc_tree_insert(_new);
 		}
@@ -156,7 +154,7 @@ node* merge_rr(node* n, void* addr, uint64_t size)
 }
 void allocator_free(void* addr, uint64_t size)
 {
-	node* _new = kmalloc(sizeof(node));
+	node* _new = alloc_node();
 	_new->addr = addr; _new->size = size;
 	alloc_tree_insert(_new);
 
@@ -172,7 +170,6 @@ void allocator_free(void* addr, uint64_t size)
 		_new->size += merge_r->size;
 		alloc_tree_delete(merge_r);
 	}
-	alloc_tree_print();
 }
 
 

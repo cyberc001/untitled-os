@@ -139,34 +139,24 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	int(*vmemory_init)() = elf_get_function_module(&module_vmemory, "init");
 	vmemory_init(memory_limit);
 
-	uart_printf("Identity mapping the module loader:\r\n");
+	uint64_t(*vmemory_get_mem_unit_size)() = elf_get_function_module(&module_vmemory, "get_mem_unit_size");
+	uint64_t vmemory_mem_unit_size = vmemory_get_mem_unit_size();
+
+	uart_printf("Identity mapping the module loader\r\n");
 	int(*vmemory_map_phys)() = elf_get_function_module(&module_vmemory, "map_phys");
 	void* kmem_heap_end = kmem_get_heap_end();
-	vmemory_map_phys(KERN_HEAP_BASE, KERN_HEAP_BASE, (kmem_heap_end - KERN_HEAP_BASE + (2 * 1024 * 1024 - 1)) / (2 * 1024 * 1024));
+	vmemory_map_phys(KERN_HEAP_BASE, KERN_HEAP_BASE, (kmem_heap_end - KERN_HEAP_BASE + (vmemory_mem_unit_size - 1)) / (vmemory_mem_unit_size));
 
 	// map kernel image:
 	struct stivale2_struct_tag_kernel_base_address *kbase_tag = stivale2_get_tag(stivale2_struct, STIVALE2_STRUCT_TAG_KERNEL_BASE_ADDRESS_ID);
-	vmemory_map_phys((void*)kbase_tag->virtual_base_address, (void*)kbase_tag->physical_base_address, 10, 0);
+	vmemory_map_phys((void*)kbase_tag->virtual_base_address, (void*)kbase_tag->physical_base_address, (20 * 1024 * 1024) / vmemory_mem_unit_size, 0);
 
 	uart_printf("Enabling memory virtualization module\r\n");
 	int(*vmemory_enable)() = elf_get_function_module(&module_vmemory, "enable");
 	vmemory_enable();
 
+	int(*vmemory_map_alloc)() = elf_get_function_module(&module_vmemory, "map_alloc");
+	kmem_set_map_functions(vmemory_map_alloc, vmemory_get_mem_unit_size);
+
 	uart_printf("Success!\r\n");
-
-	/*module module_memory = {.name = "modload_memory"};
-	void* fd = kmalloc(_fs.fd_size);
-	_fs.open(&_fs, fd, "test_module.so", FS_OPEN_READ);
-	void* fd2 = kmalloc(_fs.fd_size);
-	_fs.open(&_fs, fd2, "test_module.dsc", FS_OPEN_READ);
-	uart_printf("loaded test module: %d\r\n", module_load_kernmem(&module_memory, &_fs, fd, fd2));
-	module_add_to_gmt(&module_memory);*/
-
-	/*const char* test_func = elf_get_function_gmt("test");
-	const char* val = ((const char*(*)())test_func)();
-	uart_printf("return value: %p\r\n", val);
-
-	test_func = elf_get_function_gmt("test2");
-	uart_printf("return pointer: %p\r\n", ((int*(*)())test_func)());
-	uart_printf("return value: %d\r\n", *((int*(*)())test_func)());*/
 }

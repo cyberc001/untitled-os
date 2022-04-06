@@ -5,9 +5,6 @@
 
 #include "allocator.h"
 
-
-#define MAX_PHYS_ADDR		48		// TODO: check what is actually reported by CPU
-
 #define PFLAG_PRESENT		(1 << 0)
 #define PFLAG_CANWRITE		(1 << 1)	// if 0, writes are not allowed
 #define PFLAG_SUPERVISOR	(1 << 2)	// if 0, user-mode access is not allowed
@@ -50,6 +47,12 @@ uint64_t* pml4;
 #define SET_PDE_PHYSADDR(pde, paddr)		SET_BITS(pde, paddr, 0) // 51:21
 #define GET_PDE_PHYSADDR(addr, pde)		(void*)( ((pde) & 0xFFFFFFFE00000) | GET_BITS(addr, 0, 21))
 
+
+#define PAGE_SIZE (2 * 1024 * 1024) // 2 MB
+uint64_t get_mem_unit_size()
+{
+	return PAGE_SIZE;
+}
 
 // Functions for modifying page structures
 
@@ -116,7 +119,7 @@ int init(uint64_t mem_limit)
 	allocator_init(mem_limit);
 
 	// map a page at NULL to handle allocator errors (it returns 0 if it runs out of physical memory)
-	allocator_alloc_addr(VMEM_PAGE_SIZE, NULL);
+	allocator_alloc_addr(PAGE_SIZE, NULL);
 
 	// allocate space for PDPT and mark all pd pointers as not present
 	pml4 = kmalloc_align(sizeof(uint64_t) * PML4_ENTRIES, PML4_ALIGN);
@@ -124,14 +127,6 @@ int init(uint64_t mem_limit)
 		return VMEM_ERR_NOSPACE;
 	for(uint64_t i = 0; i < PML4_ENTRIES; ++i)
 		pml4[i] = 0x0;
-
-	/*uart_printf("map_alloc test: %d\r\n", map_alloc((void*)0xdeadbeef, 1, 0));
-	uart_printf("map_alloc repeat test: %d\r\n", map_alloc((void*)0xdeadbeef, 1, 0));*/
-
-	//uart_printf("map_phys test on null page: %d\r\n", map_phys((void*)0x0, (void*)0x0, 1, 0));
-	//uart_printf("map_phys test on 0xffff80000000: %d\r\n", map_phys((void*)0xffff80000000, (void*)0xc0000000, 1, 0));
-	//uart_printf("unmap test on 0xd0000000: %d\r\n", unmap((void*)0xd0000000, 1));
-	//uart_printf("map_phys test on 0xd0000000: %d\r\n", map_phys((void*)0xd0000000, (void*)0xd0000000, 1, 0));*/
 	return 0;
 }
 
@@ -143,9 +138,9 @@ int enable()
 }
 
 
-int map_alloc(void* vaddr, uint64_t psize, int flags)
+int map_alloc(void* vaddr, uint64_t usize, int flags)
 {
-	void* paddr = allocator_alloc(psize * VMEM_PAGE_SIZE); // TODO: not always maintain continuity (configurable through flags)
+	void* paddr = allocator_alloc(usize * PAGE_SIZE); // TODO: not always maintain continuity (configurable through flags)
 	if(!paddr)
 		return VMEM_ERR_NOSPACE;
 
@@ -161,14 +156,13 @@ int map_alloc(void* vaddr, uint64_t psize, int flags)
 	return 0;
 }
 
-int map_phys(void* vaddr, void* paddr, uint64_t psize, int flags)
+int map_phys(void* vaddr, void* paddr, uint64_t usize, int flags)
 {
-	paddr = allocator_alloc_addr(psize * VMEM_PAGE_SIZE, paddr);
+	paddr = allocator_alloc_addr(usize * PAGE_SIZE, paddr);
 	if(!paddr)
 		return VMEM_ERR_PHYS_OCCUPIED;
 
-	for(; psize; --psize, vaddr += VMEM_PAGE_SIZE, paddr += VMEM_PAGE_SIZE){
-		uart_printf("map_phys: %p --> %p\r\n", vaddr, paddr);
+	for(; usize; --usize, vaddr += PAGE_SIZE, paddr += PAGE_SIZE){
 		uint64_t* pde = make_entry(vaddr);
 		if(!pde)
 			return VMEM_ERR_NOSPACE;
@@ -181,13 +175,13 @@ int map_phys(void* vaddr, void* paddr, uint64_t psize, int flags)
 	return 0;
 }
 
-int unmap(void* vaddr, uint64_t psize)
+int unmap(void* vaddr, uint64_t usize)
 {
 	uint64_t* pde = get_entry(vaddr);
 	if(!pde)
 		return VMEM_NOT_MAPPED;
 
-	allocator_free((void*)(GET_PDE_PHYSADDR(vaddr, *pde)), psize * VMEM_PAGE_SIZE);
+	allocator_free((void*)(GET_PDE_PHYSADDR(vaddr, *pde)), usize * PAGE_SIZE);
 	*pde &= ~PFLAG_PRESENT;
 	return 0;
 }
