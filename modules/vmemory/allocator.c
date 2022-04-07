@@ -83,8 +83,8 @@ void allocator_init(uint64_t memory_limit)
 void* allocator_alloc(uint64_t size)
 {
 	node* n = alloc_tree_find_first_fit(size);
-	if(!n)
-		return NULL;
+	if(n == (void*)-1)
+		return n;
 
 	if(n->size == size)
 	{ // perfect fit
@@ -104,8 +104,8 @@ void* allocator_alloc(uint64_t size)
 void* allocator_alloc_addr(uint64_t size, void* addr)
 {
 	node* n = alloc_tree_find_containing(addr, size);
-	if(!n)
-		return NULL;
+	if(n == (void*)-1)
+		return (void*)-1;
 
 	if(n->size == size)
 	{ // perfect fit
@@ -128,6 +128,7 @@ void* allocator_alloc_addr(uint64_t size, void* addr)
 			_new->addr = addr2; _new->size = size2;
 			alloc_tree_insert(_new);
 		}
+
 		return addr;
 	}
 }
@@ -140,7 +141,7 @@ node* merge_lr(node* n, void* addr)
 		int dir = addr < n->addr + n->size ? TREE_DIR_LEFT : TREE_DIR_RIGHT;
 		n = n->child[dir];
 	}
-	return NULL;
+	return (void*)-1;
 }
 node* merge_rr(node* n, void* addr, uint64_t size)
 {
@@ -150,7 +151,7 @@ node* merge_rr(node* n, void* addr, uint64_t size)
 		int dir = addr + size < n->addr ? TREE_DIR_LEFT : TREE_DIR_RIGHT;
 		n = n->child[dir];
 	}
-	return NULL;
+	return (void*)-1;
 }
 void allocator_free(void* addr, uint64_t size)
 {
@@ -161,12 +162,12 @@ void allocator_free(void* addr, uint64_t size)
 	node* merge_l = _new->child[TREE_DIR_LEFT] ? merge_lr(_new->child[TREE_DIR_LEFT], addr) : NULL;
 	node* merge_r = _new->child[TREE_DIR_RIGHT] ? merge_rr(_new->child[TREE_DIR_RIGHT], addr, size) : NULL;
 
-	if(merge_l){
+	if(merge_l != (void*)-1){
 		_new->addr = merge_l->addr;
 		_new->size += merge_l->size;
 		alloc_tree_delete(merge_l);
 	}
-	if(merge_r){
+	if(merge_r != (void*)-1){
 		_new->size += merge_r->size;
 		alloc_tree_delete(merge_r);
 	}
@@ -389,7 +390,7 @@ node* alloc_tree_find_first_fit_r(node* n, uint64_t size)
 	if(n->child[TREE_DIR_RIGHT])
 	{ node* nn = alloc_tree_find_first_fit_r(n->child[TREE_DIR_RIGHT], size); if(nn) return nn; }
 
-	return NULL;
+	return (void*)-1;
 }
 /* BT traversal by addr */
 node* alloc_tree_find(void* addr)
@@ -400,7 +401,7 @@ node* alloc_tree_find(void* addr)
 			return cur;
 		cur = (addr < cur->addr) ? cur->child[TREE_DIR_LEFT] : cur->child[TREE_DIR_RIGHT];
 	}
-	return NULL;
+	return (void*)-1;
 }
 /* BT traversal by addr, but the criteria is addr + size interval lying in free space */
 node* alloc_tree_find_containing(void* addr, uint64_t size)
@@ -411,7 +412,7 @@ node* alloc_tree_find_containing(void* addr, uint64_t size)
 			return cur;
 		cur = (addr < cur->addr) ? cur->child[TREE_DIR_LEFT] : cur->child[TREE_DIR_RIGHT];
 	}
-	return NULL;
+	return (void*)-1;
 }
 
 // RB tree helper functions

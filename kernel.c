@@ -77,6 +77,13 @@ void* stivale2_get_tag(struct stivale2_struct* stivale2_struct, uint64_t id)
 	return NULL;
 }
 
+
+struct mmap_entry{
+	void* vaddr; void* paddr;
+	uint64_t usize;
+	int flags;
+};
+
 // First entry point
 void _start(struct stivale2_struct* stivale2_struct)
 {
@@ -87,13 +94,17 @@ void _start(struct stivale2_struct* stivale2_struct)
 
 void boot_log_write_stub(const char* str, size_t s){}
 
+
 void kernel_main(struct stivale2_struct* stivale2_struct)
 {
 	struct stivale2_struct_tag_terminal* term_str_tag;
 	term_str_tag = stivale2_get_tag(stivale2_struct, STIVALE2_STRUCT_TAG_TERMINAL_ID);
-	if(!term_str_tag)
+	if(!term_str_tag){
 		uart_printf("Couldn't find terminal tag, can't initialize boot logger\r\n");
-	boot_log_set_write_func((void*)term_str_tag->term_write);
+		boot_log_set_write_func(boot_log_write_stub);
+	}
+	else
+		boot_log_set_write_func((void*)term_str_tag->term_write);
 
 	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Initializing PCI");
 	pci_setup();
@@ -102,7 +113,7 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Generic CPU initialization");
 	cpu_interrupt_set(0);
 	cpu_init();
-	boot_log_set_write_func(boot_log_write_stub);
+	//boot_log_set_write_func(boot_log_write_stub);
 	boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Generic CPU initialization");
 
 	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Enterting protected mode");
@@ -139,9 +150,10 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 
 	struct stivale2_struct_tag_memmap *mmap_struct_tag = stivale2_get_tag(stivale2_struct, STIVALE2_STRUCT_TAG_MEMMAP_ID);
 	uint64_t memory_limit = 0;
-	for(uint64_t i = 0; i < mmap_struct_tag->entries; ++i)
+	for(uint64_t i = 0; i < mmap_struct_tag->entries; ++i){
 		if(mmap_struct_tag->memmap[i].base + mmap_struct_tag->memmap[i].length > memory_limit)
 			memory_limit = mmap_struct_tag->memmap[i].base + mmap_struct_tag->memmap[i].length;
+	}
 
 	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Initializing memory virtualization module");
 	int(*vmemory_init)() = elf_get_function_module(&module_vmemory, "init");
@@ -156,18 +168,48 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 
 	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Identity mapping module loader");
 	int(*vmemory_map_phys)() = elf_get_function_module(&module_vmemory, "map_phys");
+
 	void* kmem_heap_end = kmem_get_heap_end();
-	err = vmemory_map_phys(KERN_HEAP_BASE, KERN_HEAP_BASE, (kmem_heap_end - KERN_HEAP_BASE + (vmemory_mem_unit_size - 1)) / (vmemory_mem_unit_size));
+	struct stivale2_struct_tag_kernel_base_address *kbase_tag = stivale2_get_tag(stivale2_struct, STIVALE2_STRUCT_TAG_KERNEL_BASE_ADDRESS_ID);
+
+	#define KERN_IMG_SIZE (4 * 2 * 1024 * 1024)
+	struct mmap_entry ments[] = {
+					// identity map memory heap
+					{KERN_HEAP_BASE, KERN_HEAP_BASE, (kmem_heap_end - KERN_HEAP_BASE + (vmemory_mem_unit_size - 1)) / (vmemory_mem_unit_size), 0},
+					// identity map kernel image
+					{(void*)kbase_tag->virtual_base_address, (void*)kbase_tag->physical_base_address, KERN_IMG_SIZE / vmemory_mem_unit_size, 0}
+				    };
+	for(size_t i = 0; i < sizeof(ments) / sizeof(ments[0]); ++i){
+		err = vmemory_map_phys(ments[i].vaddr, ments[i].paddr, ments[i].usize, ments[i].flags);
+		if(err) break;
+	}
+
+	void* prev_addr = 0;
+	uint64_t prev_length = 0;
+	if(!err) for(uint64_t i = 0; i < mmap_struct_tag->entries; ++i){
+		if(mmap_struct_tag->memmap[i].type == 0x1000 || mmap_struct_tag->memmap[i].type == 0x1001 || mmap_struct_tag->memmap[i].type == 0x1002){
+			void* addr = (void*)mmap_struct_tag->memmap[i].base;
+			uint64_t length = mmap_struct_tag->memmap[i].length + (uint64_t)addr % vmemory_mem_unit_size;
+			addr = (void*)((uint64_t)addr - (uint64_t)addr % vmemory_mem_unit_size);
+			// check for overlap with previous section
+			if(prev_length && (prev_addr + (prev_length + ((prev_length + (vmemory_mem_unit_size - 1)) / vmemory_mem_unit_size) * vmemory_mem_unit_size) >= addr))
+				continue;
+			// check for overlap with kernel image
+			if(addr + ((length + (vmemory_mem_unit_size - 1)) / vmemory_mem_unit_size) * vmemory_mem_unit_size >= (void*)kbase_tag->physical_base_address + KERN_IMG_SIZE
+			&& addr <= (void*)kbase_tag->physical_base_address + KERN_IMG_SIZE)
+				continue;
+
+			err = vmemory_map_phys(addr, addr, (length + (vmemory_mem_unit_size - 1)) / vmemory_mem_unit_size, 0);
+
+			prev_addr = addr; prev_length = length;
+		}
+		if(err) break;
+	}
+
 	if(err)
 		boot_log_printf_status(BOOT_LOG_STATUS_FAIL, "Identity mapping module loader: error code %d", err);
-	else{
-		struct stivale2_struct_tag_kernel_base_address *kbase_tag = stivale2_get_tag(stivale2_struct, STIVALE2_STRUCT_TAG_KERNEL_BASE_ADDRESS_ID);
-		err = vmemory_map_phys((void*)kbase_tag->virtual_base_address, (void*)kbase_tag->physical_base_address, (20 * 1024 * 1024) / vmemory_mem_unit_size, 0);
-		if(err)
-			boot_log_printf_status(BOOT_LOG_STATUS_FAIL, "Identity mapping module loader: error code %d", err);
-		else
-			boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Identity mapping module loader");
-	}
+	else
+		boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Identity mapping module loader");
 
 	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Enabling memory virtualization module");
 	int(*vmemory_enable)() = elf_get_function_module(&module_vmemory, "enable");

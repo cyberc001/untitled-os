@@ -10,14 +10,16 @@ void gdt_init()
 	gdt_main.limit = (sizeof(gdt_desc) * GDT_MAX_DESCS) - 1;
 	gdt_main.base = (uintptr_t)&gdt[0];
 
+	// mimic stivale2 descriptors
 	gdt_add_desc(0, 0, 0, 0);
+	gdt_add_desc(0, 0xFFFF, GDT_BASIC_DESC | GDT_DESC_EXECUTABLE, 0);
+	gdt_add_desc(0, 0xFFFF, GDT_BASIC_DESC, 0);
+	gdt_add_desc(0, 0xFFFF, GDT_BASIC_DESC | GDT_DESC_EXECUTABLE, GDT_GRANULARITY_X32 | GDT_GRANULARITY_4K);
+	gdt_add_desc(0, 0xFFFF, GDT_BASIC_DESC, GDT_GRANULARITY_X32 | GDT_GRANULARITY_4K);
 	gdt_add_desc(0, 0, GDT_BASIC_DESC | GDT_DESC_EXECUTABLE, GDT_BASIC_GRANULARITY);
 	gdt_add_desc(0, 0, GDT_BASIC_DESC, GDT_BASIC_GRANULARITY);
-	gdt_add_desc(0, 0, GDT_BASIC_DESC | GDT_DESC_DPL, GDT_BASIC_GRANULARITY);
-	gdt_add_desc(0, 0, GDT_BASIC_DESC | GDT_DESC_DPL | GDT_DESC_EXECUTABLE, GDT_BASIC_GRANULARITY);
-	gdt_add_desc(0, 0, 0, 0);
 
-	gdt_reload(&gdt_main, GDT_OFFSET_KERNEL_CODE, GDT_OFFSET_KERNEL_DATA);
+	gdt_reload(&gdt_main, 0x28, 0x30);
 }
 
 int gdt_add_desc(uint64_t base, uint16_t limit, uint8_t access, uint8_t granularity)

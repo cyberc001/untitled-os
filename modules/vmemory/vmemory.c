@@ -112,14 +112,7 @@ static uint64_t* get_entry(void* vaddr)
 
 int init(uint64_t mem_limit)
 {
-	//pml4 = (void*)0x72bd000;
-	//uart_printf("GET_ENTRY: %p\r\n", get_entry(0xffff80400000));
-	//while(1) {}
-
 	allocator_init(mem_limit);
-
-	// map a page at NULL to handle allocator errors (it returns 0 if it runs out of physical memory)
-	allocator_alloc_addr(PAGE_SIZE, NULL);
 
 	// allocate space for PDPT and mark all pd pointers as not present
 	pml4 = kmalloc_align(sizeof(uint64_t) * PML4_ENTRIES, PML4_ALIGN);
@@ -134,6 +127,7 @@ int enable()
 {
 	// load PML4 into CR3:
 	asm volatile("mov %0, %%cr3" :: "r" (pml4));
+	//while(1) {}
 	return 0;
 }
 
@@ -141,7 +135,7 @@ int enable()
 int map_alloc(void* vaddr, uint64_t usize, int flags)
 {
 	void* paddr = allocator_alloc(usize * PAGE_SIZE); // TODO: not always maintain continuity (configurable through flags)
-	if(!paddr)
+	if(paddr == (void*)-1)
 		return VMEM_ERR_NOSPACE;
 
 	uint64_t* pde = make_entry(vaddr);
@@ -159,7 +153,7 @@ int map_alloc(void* vaddr, uint64_t usize, int flags)
 int map_phys(void* vaddr, void* paddr, uint64_t usize, int flags)
 {
 	paddr = allocator_alloc_addr(usize * PAGE_SIZE, paddr);
-	if(!paddr)
+	if(paddr == (void*)-1)
 		return VMEM_ERR_PHYS_OCCUPIED;
 
 	for(; usize; --usize, vaddr += PAGE_SIZE, paddr += PAGE_SIZE){

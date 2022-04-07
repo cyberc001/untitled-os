@@ -13,7 +13,7 @@ void allocator_init(uint64_t mem_limit);
 *  Arguments:
 *  	size - size of requested continous space.
 *  Return value:
-*	a valid pointer or NULL if there wasn't any free space of such size.
+*	a valid pointer or (void*)-1 if there wasn't any free space of such size.
 */
 void* allocator_alloc(uint64_t size);
 
@@ -22,7 +22,7 @@ void* allocator_alloc(uint64_t size);
 *	size - size of requested continous space.
 *	addr - address to be marked as occupied.
 *  Return value:
-*	addr or NULL if given address was already occupied (may be partially) / doesn't physically exist
+*	addr or (void*)-1 if given address was already occupied (may be partially) / doesn't physically exist
 */
 void* allocator_alloc_addr(uint64_t size, void* addr);
 
