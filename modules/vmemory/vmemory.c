@@ -5,20 +5,20 @@
 
 #include "allocator.h"
 
-#define PFLAG_PRESENT		(1 << 0)
-#define PFLAG_CANWRITE		(1 << 1)	// if 0, writes are not allowed
-#define PFLAG_SUPERVISOR	(1 << 2)	// if 0, user-mode access is not allowed
-#define PFLAG_WRITETHROUGH	(1 << 3)
-#define PFLAG_CACHEDISABLE	(1 << 4)	// if 1, disables caching this page
-#define PFLAG_ACCESSED		(1 << 5)
-#define PFLAG_DIRTY		(1 << 6)
-#define PFLAG_PSIZE		(1 << 7)	// if 1 at:
-						// Page Directory Pointer Table Entry (PDPTE): maps a 1 GB page
-						// Page Directory Entry (PDE): maps a 2 MB page
-						// if 0, pages have size of 4 KB
-#define PFLAG_GLOBAL		(1 << 8)	// if 1, translation is global (not invalidated in TLB)
-#define PFLAG_PAT		(1 << 12)
-#define PFLAG_XD		(1 << 63)	// if 1, does not allow instruction fetches from this page (if CPU supports it)
+#define PFLAG_PRESENT			(1 << 0)
+#define PFLAG_CANWRITE			(1 << 1)	// if 0, writes are not allowed
+#define PFLAG_SUPERVISOR		(1 << 2)	// if 0, user-mode access is not allowed
+#define PFLAG_WRITETHROUGH		(1 << 3)
+#define PFLAG_CACHEDISABLE		(1 << 4)	// if 1, disables caching this page
+#define PFLAG_ACCESSED			(1 << 5)
+#define PFLAG_DIRTY				(1 << 6)
+#define PFLAG_PSIZE				(1 << 7)	// if 1 at:
+											// Page Directory Pointer Table Entry (PDPTE): maps a 1 GB page
+											// Page Directory Entry (PDE): maps a 2 MB page
+											// if 0, pages have size of 4 KB
+#define PFLAG_GLOBAL			(1 << 8)	// if 1, translation is global (not invalidated in TLB)
+#define PFLAG_PAT				(1 << 12)
+#define PFLAG_XD				(1 << 63)	// if 1, does not allow instruction fetches from this page (if CPU supports it)
 
 
 #define GET_BITS_LAST(expr, amt)		((uint64_t)(expr) & ((1 << (amt)) - 1))
@@ -29,32 +29,77 @@
 // PML4:
 uint64_t* pml4;
 #define PML4_ENTRIES				512
-#define PML4_ALIGN				4096
-#define GET_PML4E(addr)				(uint64_t*)((uint64_t)pml4 | (GET_BITS(addr, 39, 48) << 3))
-#define SET_PDPT(pml4e, paddr)			SET_BITS(pml4e, paddr, 0) // 51:12
+#define PML4_ALIGN					4096
+#define GET_PML4E(addr)				(uint64_t*)((uint64_t)cur_hndl->pml4 | (GET_BITS(addr, 39, 48) << 3))
+#define SET_PDPT(pml4e, paddr)		SET_BITS(pml4e, paddr, 0) // 51:12
 
 // PDPT:
 #define PDPT_ENTRIES				512
-#define PDPT_ALIGN				4096
-#define GET_PDPTE(addr, pml4e)			(uint64_t*)( ((pml4e) & 0xFFFFFFFFFF000) | (GET_BITS(addr, 30, 39) << 3))
-#define SET_PD(pdpte, paddr)			SET_BITS(pdpte, paddr, 0) // 51:12
+#define PDPT_ALIGN					4096
+#define GET_PDPTE(addr, pml4e)		((uint64_t*)( ((pml4e) & 0xFFFFFFFFFF000) | (GET_BITS(addr, 30, 39) << 3)))
+#define SET_PD(pdpte, paddr)		SET_BITS(pdpte, paddr, 0) // 51:12
 
 // PD:
-#define PD_ENTRIES				512
-#define PD_ALIGN				4096
-#define GET_PDE(addr, pdpte)			(uint64_t*)( ((pdpte) & 0xFFFFFFFFFF000) | (GET_BITS(addr, 21, 30) << 3))
+#define PD_ENTRIES					512
+#define PD_ALIGN					4096
+#define GET_PDE(addr, pdpte)		(uint64_t*)( ((pdpte) & 0xFFFFFFFFFF000) | (GET_BITS(addr, 21, 30) << 3))
 
 #define SET_PDE_PHYSADDR(pde, paddr)		SET_BITS(pde, paddr, 0) // 51:21
-#define GET_PDE_PHYSADDR(addr, pde)		(void*)( ((pde) & 0xFFFFFFFE00000) | GET_BITS(addr, 0, 21))
-
+#define GET_PDE_PHYSADDR(addr, pde)			(void*)( ((pde) & 0xFFFFFFFE00000) | GET_BITS(addr, 0, 21))
 
 #define PAGE_SIZE (2 * 1024 * 1024) // 2 MB
-uint64_t get_mem_unit_size()
+uint64_t get_mem_unit_size() { return PAGE_SIZE; }
+
+
+/* Helper functions for managing context and memory unit size: */
+
+typedef struct {
+	uint64_t* pml4;
+} mem_hndl;
+mem_hndl* cur_hndl;
+
+uint64_t get_mem_hndl_size() { return sizeof(mem_hndl); }
+
+int create_mem_hndl(void* _hndl)
 {
-	return PAGE_SIZE;
+	mem_hndl* hndl = _hndl;
+	// allocate space for PDPT and mark all pd pointers as not present
+	hndl->pml4 = kmalloc_align(sizeof(uint64_t) * PML4_ENTRIES, PML4_ALIGN);
+	if(!hndl->pml4)
+		return VMEM_ERR_NOSPACE;
+	for(uint64_t i = 0; i < PML4_ENTRIES; ++i)
+		hndl->pml4[i] = 0x0;
+	return 0;
 }
 
-// Functions for modifying page structures
+int select_mem_hndl(void* _hndl, int activate)
+{
+	mem_hndl* hndl = _hndl;
+	cur_hndl = hndl;
+	if(activate)
+		asm volatile("mov %0, %%cr3" :: "r" (hndl->pml4));
+	return 0;
+}
+
+int destroy_mem_hndl(void* _hndl)
+{
+	mem_hndl* hndl = _hndl;
+	for(uint64_t i = 0; i < PML4_ENTRIES; ++i){
+		if(!(hndl->pml4[i] & PFLAG_PRESENT))
+			continue;
+		for(uint64_t j = 0; j < PDPT_ENTRIES; ++j){
+			if(!(GET_PDPTE(0, hndl->pml4[i])[j] & PFLAG_PRESENT))
+				continue;
+			kfree(GET_PDE(0, GET_PDPTE(0, hndl->pml4[i])[j]));
+		}
+		kfree(GET_PDPTE(0, hndl->pml4[i]));
+	}
+	kfree(hndl->pml4);
+	return 0;
+}
+
+
+/* Memory mapping functions: */
 
 /* Makes an entry for specified virtual address.
 *  If there was already an entry, the existing entry is returned, so check for the present bit.
@@ -113,21 +158,6 @@ static uint64_t* get_entry(void* vaddr)
 int init(uint64_t mem_limit)
 {
 	allocator_init(mem_limit);
-
-	// allocate space for PDPT and mark all pd pointers as not present
-	pml4 = kmalloc_align(sizeof(uint64_t) * PML4_ENTRIES, PML4_ALIGN);
-	if(!pml4)
-		return VMEM_ERR_NOSPACE;
-	for(uint64_t i = 0; i < PML4_ENTRIES; ++i)
-		pml4[i] = 0x0;
-	return 0;
-}
-
-int enable()
-{
-	// load PML4 into CR3:
-	asm volatile("mov %0, %%cr3" :: "r" (pml4));
-	//while(1) {}
 	return 0;
 }
 

@@ -166,6 +166,24 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	uint64_t(*vmemory_get_mem_unit_size)() = elf_get_function_module(&module_vmemory, "get_mem_unit_size");
 	uint64_t vmemory_mem_unit_size = vmemory_get_mem_unit_size();
 
+	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Creating memory context for kernel");
+	uint64_t(*get_mem_hndl_size)() = elf_get_function_module(&module_vmemory, "get_mem_hndl_size");
+	uint64_t mem_hndl_size = get_mem_hndl_size();
+	void* kernel_mem_hndl = kmalloc(mem_hndl_size);
+	int(*create_mem_hndl)() = elf_get_function_module(&module_vmemory, "create_mem_hndl");
+	int(*select_mem_hndl)() = elf_get_function_module(&module_vmemory, "select_mem_hndl");
+	//int(*destroy_mem_hndl)() = elf_get_function_module(&module_vmemory, "destroy_mem_hndl");
+	err = create_mem_hndl(kernel_mem_hndl);
+	if(err)
+		boot_log_printf_status(BOOT_LOG_STATUS_FAIL, "Creating memory context for kernel: error code %d", err);
+	else{
+		err = select_mem_hndl(kernel_mem_hndl, 0);
+		if(err)
+			boot_log_printf_status(BOOT_LOG_STATUS_FAIL, "Creating memory context for kernel: error code %d", err);
+		else
+			boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Creating memory context for kernel");
+	}
+
 	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Identity mapping module loader");
 	int(*vmemory_map_phys)() = elf_get_function_module(&module_vmemory, "map_phys");
 
@@ -211,13 +229,12 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	else
 		boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Identity mapping module loader");
 
-	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Enabling memory virtualization module");
-	int(*vmemory_enable)() = elf_get_function_module(&module_vmemory, "enable");
-	err = vmemory_enable();
+	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Selecting kernel memory context");
+	err = select_mem_hndl(kernel_mem_hndl, 1);
 	if(err)
-		boot_log_printf_status(BOOT_LOG_STATUS_FAIL, "Enabling memory virtualization module");
+		boot_log_printf_status(BOOT_LOG_STATUS_FAIL, "Selecting kernel memory context");
 	else
-		boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Enabling memory virtualization module");
+		boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Selecting kernel memory context");
 
 	int(*vmemory_map_alloc)() = elf_get_function_module(&module_vmemory, "map_alloc");
 	kmem_set_map_functions(vmemory_map_alloc, vmemory_get_mem_unit_size);
