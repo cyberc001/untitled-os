@@ -188,8 +188,8 @@ void module_init_api()
 		// /x86
 			// gdt.h
 			GMAPI_ENTRY(gdt_add_desc)
+			GMAPI_ENTRY(gdt_add_tss_desc)
 			GMAPI_ENTRY(gdt_reload)
-			GMAPI_ENTRY(gdt_install_tss)
 			GMAPI_ENTRY(gdt_init)
 			// pic.h
 			GMAPI_ENTRY(pic_send_eoi)

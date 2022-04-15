@@ -18,14 +18,16 @@ void boot_log_printf(const char* format, ...)
 #define BOOT_LOG_STATUS_RUNNING		0
 #define BOOT_LOG_STATUS_SUCCESS		1
 #define BOOT_LOG_STATUS_FAIL		2
+#define BOOT_LOG_STATUS_NLINE		3
 
 #define boot_log_printf_status(status, format, ...)\
 	boot_log_printf("%s " format "%s",\
 			  (status) == BOOT_LOG_STATUS_RUNNING ? "[....]"\
 			: (status) == BOOT_LOG_STATUS_SUCCESS ? "[ OK ]"\
 			: (status) == BOOT_LOG_STATUS_FAIL    ? "[FAIL]"\
+			: (status) == BOOT_LOG_STATUS_NLINE	  ? "      "\
 			: "[    ]",\
 			##__VA_ARGS__,\
-			(((status) == BOOT_LOG_STATUS_SUCCESS) | ((status) == BOOT_LOG_STATUS_FAIL)) ? "\r\n" : "\r")
+			(((status) == BOOT_LOG_STATUS_SUCCESS) | ((status) == BOOT_LOG_STATUS_FAIL) | ((status) == BOOT_LOG_STATUS_NLINE)) ? "\r\n" : "\r")
 
 #endif

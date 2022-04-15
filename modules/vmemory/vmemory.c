@@ -118,7 +118,7 @@ static uint64_t* make_entry(void* vaddr)
 		for(uint64_t i = 0; i < PDPT_ENTRIES; ++i)
 			new_pdpt[i] = 0x0;
 		SET_PDPT(*pml4e, (uint64_t)new_pdpt);
-		*pml4e |= PFLAG_PRESENT;
+		*pml4e |= PFLAG_PRESENT | PFLAG_CANWRITE;
 	}
 
 	uint64_t* pdpte = GET_PDPTE(vaddr, *pml4e);
@@ -129,7 +129,7 @@ static uint64_t* make_entry(void* vaddr)
 		for(uint64_t i = 0; i < PD_ENTRIES; ++i)
 			new_pd[i] = 0x0;
 		SET_PD(*pdpte, (uint64_t)new_pd);
-		*pdpte |= PFLAG_PRESENT;
+		*pdpte |= PFLAG_PRESENT | PFLAG_CANWRITE;
 	}
 
 	uint64_t* pde = GET_PDE(vaddr, *pdpte);
@@ -175,16 +175,14 @@ int map_alloc(void* vaddr, uint64_t usize, int flags)
 		return VMEM_ERR_VIRT_OCCUPIED;
 
 	SET_PDE_PHYSADDR(*pde, (uint64_t)paddr);
-	*pde |= PFLAG_PRESENT;
+	*pde |= PFLAG_PRESENT | PFLAG_CANWRITE;
 
 	return 0;
 }
 
 int map_phys(void* vaddr, void* paddr, uint64_t usize, int flags)
 {
-	paddr = allocator_alloc_addr(usize * PAGE_SIZE, paddr);
-	if(paddr == (void*)-1)
-		return VMEM_ERR_PHYS_OCCUPIED;
+	allocator_alloc_addr(usize * PAGE_SIZE, paddr); // TODO: add a flag for ignoring failure to allocate page frame
 
 	for(; usize; --usize, vaddr += PAGE_SIZE, paddr += PAGE_SIZE){
 		uint64_t* pde = make_entry(vaddr);
@@ -194,7 +192,7 @@ int map_phys(void* vaddr, void* paddr, uint64_t usize, int flags)
 			return VMEM_ERR_VIRT_OCCUPIED;
 
 		SET_PDE_PHYSADDR(*pde, (uint64_t)paddr);
-		*pde |= PFLAG_PRESENT;
+		*pde |= PFLAG_PRESENT | PFLAG_CANWRITE;
 	}
 	return 0;
 }

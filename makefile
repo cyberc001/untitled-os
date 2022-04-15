@@ -87,6 +87,8 @@ clean:
 run:
 	qemu-system-x86_64 -cdrom iso/myos.iso \
 			 -drive id=disk,file=atest.img,if=ide,cache=none,format=raw \
+			 -no-reboot -no-shutdown \
+			 -smp cpus=4,threads=2 \
 			 -d int \
 			 #-S -gdb tcp::1234
 
@@ -104,7 +106,7 @@ img_umount:
 
 clean_modules:
 	rm modules/*/*.so
-modules: modules/vmemory/vmemory.so
+modules: modules/vmemory/vmemory.so modules/mtask/mtask.so
 
 # virtual memory module
 modules/vmemory/vmemory.so: modules/vmemory/vmemory.o modules/vmemory/allocator.o
@@ -116,6 +118,16 @@ modules/vmemory/vmemory.so: modules/vmemory/vmemory.o modules/vmemory/allocator.
 modules/vmemory/vmemory.o: modules/vmemory/vmemory.c modules/vmemory/vmemory.h modules/vmemory/allocator.h
 	$(CC_MODULE) -c $< -o $@ -fPIC
 modules/vmemory/allocator.o: modules/vmemory/allocator.c modules/vmemory/allocator.h
+	$(CC_MODULE) -c $< -o $@ -fPIC
+
+# multitasking module
+modules/mtask/mtask.so: modules/mtask/mtask.o
+	$(LD) -shared -fPIC -nostdlib $^ -o $@
+	-sudo umount ../mnt
+	sudo mount -o loop atest.img ../mnt
+	sudo cp $@ ../mnt
+	sudo umount ../mnt
+modules/mtask/mtask.o: modules/mtask/mtask.c modules/mtask/mtask.h
 	$(CC_MODULE) -c $< -o $@ -fPIC
 
 # test module

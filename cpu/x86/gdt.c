@@ -1,65 +1,69 @@
 #include "gdt.h"
 #include <stddef.h>
 
-static gdt_desc gdt[GDT_MAX_DESCS];
+static unsigned char gdt[GDT_MAX_SIZE];
 static gdt_ptr gdt_main;
-static uint16_t gdt_last_ind;
+static uint32_t gdt_last_off = 0;
 
 void gdt_init()
 {
-	gdt_main.limit = (sizeof(gdt_desc) * GDT_MAX_DESCS) - 1;
+	gdt_main.limit = GDT_MAX_SIZE - 1;
 	gdt_main.base = (uintptr_t)&gdt[0];
 
-	// mimic stivale2 descriptors
+	uint32_t kernel_code_off, kernel_data_off;
+
+	// mimic stivale2 descriptors (CPL = 0):
 	gdt_add_desc(0, 0, 0, 0);
-	gdt_add_desc(0, 0xFFFF, GDT_BASIC_DESC | GDT_DESC_EXECUTABLE, 0);
-	gdt_add_desc(0, 0xFFFF, GDT_BASIC_DESC, 0);
-	gdt_add_desc(0, 0xFFFF, GDT_BASIC_DESC | GDT_DESC_EXECUTABLE, GDT_GRANULARITY_X32 | GDT_GRANULARITY_4K);
-	gdt_add_desc(0, 0xFFFF, GDT_BASIC_DESC, GDT_GRANULARITY_X32 | GDT_GRANULARITY_4K);
-	gdt_add_desc(0, 0, GDT_BASIC_DESC | GDT_DESC_EXECUTABLE, GDT_BASIC_GRANULARITY);
-	gdt_add_desc(0, 0, GDT_BASIC_DESC, GDT_BASIC_GRANULARITY);
+	gdt_add_desc(0, 0xFFFF, GDT_BASIC_DESC | GDT_DESC_EXECUTABLE, 0); // 16-bit code
+	gdt_add_desc(0, 0xFFFF, GDT_BASIC_DESC, 0); // 16-bit data
+	gdt_add_desc(0, 0xFFFF, GDT_BASIC_DESC | GDT_DESC_EXECUTABLE, GDT_GRANULARITY_X32 | GDT_GRANULARITY_4K); // 32-bit code
+	gdt_add_desc(0, 0xFFFF, GDT_BASIC_DESC, GDT_GRANULARITY_X32 | GDT_GRANULARITY_4K); // 32-bit data
+	kernel_code_off = gdt_add_desc(0, 0, GDT_BASIC_DESC | GDT_DESC_EXECUTABLE, GDT_BASIC_GRANULARITY); // 64-bit code
+	kernel_data_off = gdt_add_desc(0, 0, GDT_BASIC_DESC, GDT_BASIC_GRANULARITY); // 64-bit data
+	// descriptors for user-space (CPL = 3):
+	gdt_add_desc(0, 0, GDT_BASIC_DESC | GDT_DESC_EXECUTABLE | GDT_DESC_DPL, GDT_BASIC_GRANULARITY); // 64-bit code
+	gdt_add_desc(0, 0, GDT_BASIC_DESC | GDT_DESC_DPL, GDT_BASIC_GRANULARITY); // 64-bit data
 
-	gdt_reload(&gdt_main, 0x28, 0x30);
+	gdt_reload(&gdt_main, kernel_code_off, kernel_data_off);
 }
 
-int gdt_add_desc(uint64_t base, uint16_t limit, uint8_t access, uint8_t granularity)
+
+uint32_t gdt_add_desc(uint64_t base, uint16_t limit, uint8_t access, uint8_t granularity)
 {
-	if(gdt_last_ind >= GDT_MAX_DESCS)
-		return 0;
+	if(gdt_last_off >= GDT_MAX_SIZE - sizeof(gdt_desc) - 1)
+		return (uint32_t)-1;
 
-	gdt[gdt_last_ind].base_low = base & 0xFFFF;
-	gdt[gdt_last_ind].base_mid = (base >> 16) & 0xFF;
-	gdt[gdt_last_ind].base_high = (base >> 24) & 0xFF;
+	gdt_desc* gdte = (gdt_desc*)(gdt + gdt_last_off);
 
-	gdt[gdt_last_ind].limit = limit;
+	gdte->base_low = base & 0xFFFF;
+	gdte->base_mid = (base >> 16) & 0xFF;
+	gdte->base_high = (base >> 24) & 0xFF;
 
-	gdt[gdt_last_ind].flags = access;
-	gdt[gdt_last_ind].granularity = granularity;
+	gdte->limit = limit;
 
-	gdt_last_ind++;
-	return 1;
+	gdte->flags = access;
+	gdte->granularity = granularity;
+
+	gdt_last_off += sizeof(gdt_desc);
+	return gdt_last_off - sizeof(gdt_desc);
 }
 
-#define TSS_SIZE 0x70
-
-uint16_t gdt_install_tss(uint64_t tss)
+uint32_t gdt_add_tss_desc(uint64_t rsp[3], uint64_t ist[7])
 {
-	uint8_t tss_type = GDT_DESC_ACCESS | GDT_DESC_EXECUTABLE | GDT_DESC_PRESENT;
+	if(gdt_last_off >= GDT_MAX_SIZE - sizeof(gdt_tss_desc) - 1)
+		return (uint32_t)-1;
 
-	gdt_tss_desc* tss_desc = (gdt_tss_desc*)&gdt[gdt_last_ind];
+	gdt_tss_desc* tssd = (gdt_tss_desc*)(gdt + gdt_last_off);
 
-	if(gdt_last_ind >= GDT_MAX_DESCS)
-        	return 0;
+	for(size_t i = 0; i < 3; ++i)
+		tssd->rsp[i] = rsp[i];
+	for(size_t i = 0; i < 7; ++i)
+		tssd->ist[i] = ist[i];
 
-	tss_desc->limit0 = TSS_SIZE & 0xFFFF;
-	tss_desc->addr0 = tss & 0xFFFF;
-	tss_desc->addr1 = (tss & 0xFF0000) >> 16;
-	tss_desc->type0 = tss_type;
-	tss_desc->limit1 = (TSS_SIZE & 0xF0000) >> 16;
-	tss_desc->addr2 = (tss & 0xFF000000) >> 24;
-	tss_desc->addr3 = tss >> 32;
-	tss_desc->resv0 = 0;
+	tssd->resv0 = tssd->resv1 = tssd->resv2 = tssd->resv3 = 0;
 
-	gdt_last_ind += 2;
-	return (gdt_last_ind - 2) * GDT_DESC_SIZE;
+	tssd->io_map = sizeof(gdt_tss_desc); // no I/O map
+
+	gdt_last_off += sizeof(gdt_tss_desc);
+	return gdt_last_off - sizeof(gdt_tss_desc);
 }

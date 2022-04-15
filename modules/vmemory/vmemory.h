@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-/* Basic virtual memory module, that utilizes paging.
+/* Virtual memory module, that utilizes paging.
 *  It tries to be as generic as possible, but main assumption is that paging well be used.
 *  To be able to fit any kind of memory model, API for a virtual memory model should define function get_mem_unit_size().
 */
@@ -18,6 +18,17 @@
 
 
 /* Helper functions for managing context and memory unit size: */
+
+/* Initializes the module (called right after loading the module, prior to any other function calls).
+*  Arguments:
+*       mem_limit - maximum amount of physical memory.
+*                   just used to set up the initial free memory blocks structure (RB tree in this module). Identity mapping what kernel has
+*                   used so far as well as various memory-mapped I/O is done by the module loader.
+*  Return value:
+*	0 			OK
+*	non-zero 	error, see code above
+*/
+int init(uint64_t mem_limit);
 
 /* Returns size of memory unit used (page, buddy allocator chunk, byte), in bytes. */
 uint64_t get_mem_unit_size();
@@ -51,14 +62,6 @@ int destroy_mem_hndl(void* hndl);
 
 
 /* Memory mapping functions: */
-
-/* Initializes the module (called right after loading the module, prior to any other function calls).
-*  Arguments:
-*       mem_limit - maximum amount of physical memory.
-*                   just used to set up the initial free memory blocks structure (RB tree in this module). Identity mapping what kernel has
-*                   used so far as well as various memory-mapped I/O is done by the module loader.
-*/
-int init(uint64_t mem_limit);
 
 /* Maps a chunk of memory on specified virtual address to some physical address returned by the allocator.
 *  Arguments:

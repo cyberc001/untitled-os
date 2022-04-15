@@ -115,16 +115,14 @@ uint64_t elf_get_symbol_value(elf_header* header, const char** dependencies, elf
 		char* stb = elf_get_strtable(header, symtable->link);
 		char* name = stb + symbol->name;
 
-		elf_symbol* val_sym = elf_lookup_symbol(name, dependencies, &gmt, header, NULL, NULL); // lookup symbol in symbol string table
-		// if the lookup returned the symbol itself, look for it in the module loader API
-		if(val_sym == symbol){
-			for(size_t s = 0; s < gmapi.length; ++s){
-				if(!strcmp(gmapi.names[s], name)){
-					*error = ELF_HINT_MLOADER_API;
-					return gmapi.symbols[s];
-				}
+		// try to find a module loader API symbol first
+		for(size_t s = 0; s < gmapi.length; ++s){
+			if(!strcmp(gmapi.names[s], name)){
+				*error = ELF_HINT_MLOADER_API;
+				return gmapi.symbols[s];
 			}
 		}
+		elf_symbol* val_sym = elf_lookup_symbol(name, dependencies, &gmt, header, NULL, NULL); // lookup symbol in symbol string table
 		if(!val_sym){
 			if(ELF_SYMBOL_INFO_BIND(*symbol) & ELF_SYMBOL_BIND_WEAK)
 				return 0;
@@ -229,7 +227,6 @@ static int elf_relocate_symbol_addend(elf_header* header, const char** dependenc
 		default:
 			return ELF_ERR_UNSUPPORTED_RELOCATION_TYPE;
 	}
-	//printf("offset: %p rel: %p\r\n", (void*)rela->offset, (void*)*target_rel);
 	return 0;
 }
 

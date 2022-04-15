@@ -205,7 +205,7 @@ void alloc_tree_insert(node* n)
 void alloc_tree_insertp(node* n, node* p, int dir)
 {
 	node	*g,		// grandparent
-		*u;		// uncle
+			*u;		// uncle
 
 	TREE_SET_CLR(n, TREE_CLR_RED)
 	n->child[TREE_DIR_LEFT] = n->child[TREE_DIR_RIGHT] = NULL;
