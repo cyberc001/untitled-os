@@ -1,0 +1,5 @@
+cpu_set_apic_base
+apic_local_deliver
+apic_deliver_irq
+apic_mem_readl
+apic_mem_writel

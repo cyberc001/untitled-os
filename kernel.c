@@ -45,16 +45,6 @@ static struct stivale2_header_tag_framebuffer framebuffer_hdr_tag =
 	.framebuffer_bpp    = 0
 };
 
-// SMP header tag (requesting multi-processor setup and info)
-static struct stivale2_header_tag_smp smp_hdr_tag =
-{
-	.tag = {
-		.identifier = STIVALE2_HEADER_TAG_SMP_ID,
-		.next = (uint64_t)&framebuffer_hdr_tag
-	},
-	.flags = 1
-};
-
 // Putting a header structure to stivale2 ELF section
 __attribute__((section(".stivale2hdr"), used))
 static struct stivale2_header stivale_hdr =
@@ -70,7 +60,7 @@ static struct stivale2_header stivale_hdr =
 	// 4		disable "some deprecated feature"?
 	.flags = (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4),
 	// head of linked list of headers:
-   	.tags = (uintptr_t)&smp_hdr_tag
+   	.tags = (uintptr_t)&framebuffer_hdr_tag
 };
 
 // scan for tags wanted from bootloader
@@ -107,6 +97,8 @@ void boot_log_write_stub(const char* str, size_t s){}
 
 void kernel_main(struct stivale2_struct* stivale2_struct)
 {
+	kmem_init();
+
 	struct stivale2_struct_tag_terminal* term_str_tag;
 	term_str_tag = stivale2_get_tag(stivale2_struct, STIVALE2_STRUCT_TAG_TERMINAL_ID);
 	if(!term_str_tag){
@@ -116,29 +108,17 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	else
 		boot_log_set_write_func((void*)term_str_tag->term_write);
 
-	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Getting SMP info");
-	struct stivale2_struct_tag_smp* smp_str_tag;
-	smp_str_tag = stivale2_get_tag(stivale2_struct, STIVALE2_STRUCT_TAG_SMP_ID);
-	uint32_t* cpu_lapic_ids = kmalloc(smp_str_tag->cpu_count * sizeof(uint32_t));
-	uint64_t cpu_count = smp_str_tag->cpu_count;
-	if(!smp_str_tag)
-		boot_log_printf_status(BOOT_LOG_STATUS_FAIL, "Getting SMP info");
-	else{
-		boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Getting SMP info");
-		boot_log_printf_status(BOOT_LOG_STATUS_NLINE, "Logical cores count: %lu", smp_str_tag->cpu_count);
-		boot_log_printf_status(BOOT_LOG_STATUS_NLINE, "Bootstrap processor LAPIC ID: %u", smp_str_tag->bsp_lapic_id);
-		for(uint64_t i = 0; i < smp_str_tag->cpu_count; ++i)
-			cpu_lapic_ids[i] = smp_str_tag->smp_info[i].lapic_id;
-	}
-
 	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Initializing PCI");
 	pci_setup();
 	boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Initializing PCI");
 
 	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Generic CPU initialization");
 	cpu_interrupt_set(0);
-	cpu_init();
-	boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Generic CPU initialization");
+	int err = cpu_init();
+	if(err)
+		boot_log_printf_status(BOOT_LOG_STATUS_FAIL, "Generic CPU initialization: error code %d", err);
+	else
+		boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Generic CPU initialization");
 
 	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Enterting protected mode");
 	cpu_mode_set(CPU_MODE_PROTECTED);
@@ -165,7 +145,7 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	void *modfd = kmalloc(_fs.fd_size), *descfd = kmalloc(_fs.fd_size);
 	_fs.open(&_fs, modfd, "vmemory.so", FS_OPEN_READ);
 	_fs.open(&_fs, descfd, "vmemory.dsc", FS_OPEN_READ);
-	int err = module_load_kernmem(&module_vmemory, &_fs, modfd, descfd);
+	err = module_load_kernmem(&module_vmemory, &_fs, modfd, descfd);
 	if(err)
 		boot_log_printf_status(BOOT_LOG_STATUS_FAIL, "Loading memory virtualization module: error code %d", err);
 	else
@@ -180,7 +160,7 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 		if(mmap_struct_tag->memmap[i].type == 1 && mmap_struct_tag->memmap[i].base + mmap_struct_tag->memmap[i].length > memory_limit)
 			memory_limit = mmap_struct_tag->memmap[i].base + mmap_struct_tag->memmap[i].length;
 	}
-	boot_log_printf_status(BOOT_LOG_STATUS_NLINE, "Memory limit: %p", (void*)memory_limit);
+	boot_log_printf_status(BOOT_LOG_STATUS_NLINE, "Memory limit: 0x%p", (void*)memory_limit);
 
 	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Initializing memory virtualization module");
 	int(*vmemory_init)() = elf_get_function_module(&module_vmemory, "init");
@@ -222,6 +202,8 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	struct mmap_entry ments[] = {
 					// identity map memory heap
 					{KERN_HEAP_BASE, KERN_HEAP_BASE, (kmem_heap_end - KERN_HEAP_BASE + (vmemory_mem_unit_size - 1)) / (vmemory_mem_unit_size), 0},
+					// identity map APIC base
+					{(void*)0xfee00000, (void*)0xfee00000, (0x400/*APIC_REG_SIZE*/ + (vmemory_mem_unit_size - 1)) / (vmemory_mem_unit_size), 0},
 					// identity map kernel image
 					{(void*)kbase_tag->virtual_base_address, (void*)kbase_tag->physical_base_address, (KERN_IMG_SIZE + (vmemory_mem_unit_size - 1)) / vmemory_mem_unit_size, 0}
 				    };
@@ -283,12 +265,12 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	_fs.close(&_fs, descfd);
 
 	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Initializing multitasking module");
-	int(*mtask_init)() = elf_get_function_module(&module_mtask, "init");
-	err = mtask_init(cpu_count, cpu_lapic_ids);
+	boot_log_increase_nest_level();
+	int(*mtask_init)() = elf_get_function_module(&module_mtask, "init"); err = mtask_init();
+	boot_log_decrease_nest_level();
 
 	if(err)
 		boot_log_printf_status(BOOT_LOG_STATUS_FAIL, "Initializing multitasking module: error code %d", err);
 	else
 		boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Initializing multitasking module");
 }
-

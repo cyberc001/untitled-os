@@ -165,6 +165,7 @@ typedef struct{
 // Hints:
 
 #define ELF_HINT_MLOADER_API		-100
+#define ELF_HINT_OTHER_MODULE		-101
 
 
 // ---------------------

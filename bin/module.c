@@ -154,11 +154,14 @@ module_loader_api gmapi = {NULL, NULL, 0};
 #include "cpu/cpu_int.h"
 #include "cpu/x86/gdt.h"
 #include "cpu/x86/pic.h"
+#include "cpu/x86/cpuid.h"
+#include "cpu/x86/apic.h"
 #include "dev/pio.h"
+#include "log/boot_log.h"
 void module_init_api()
 {
 	#define GMAPI_ENTRY(sym) { size_t i = __COUNTER__; gmapi.symbols[i] = (uint64_t)(sym); gmapi.names[i] = #sym; }
-	gmapi.length = 43;
+	gmapi.length = 57;
 	gmapi.symbols = kmalloc(sizeof(uint64_t) * gmapi.length);
 	gmapi.names = kmalloc(sizeof(const char*) * gmapi.length);
 
@@ -198,6 +201,15 @@ void module_init_api()
 			GMAPI_ENTRY(pic_clear_mask)
 			GMAPI_ENTRY(pic_get_irr)
 			GMAPI_ENTRY(pic_get_isr)
+			// cpuid.h
+			GMAPI_ENTRY(cpuid_check)
+			GMAPI_ENTRY(cpuid)
+			// apic.h
+			GMAPI_ENTRY(apic_check)
+			GMAPI_ENTRY(apic_set_base)
+			GMAPI_ENTRY(apic_get_base)
+			GMAPI_ENTRY(lapic_read)
+			GMAPI_ENTRY(lapic_write)
 	// /cstdlib
 		// string.h
 		GMAPI_ENTRY(memcpy)
@@ -219,6 +231,15 @@ void module_init_api()
 		GMAPI_ENTRY(krealloc)
 		GMAPI_ENTRY(kfree)
 		GMAPI_ENTRY(print_kmem_llist)
+	// /log
+		// boot_log.h
+		GMAPI_ENTRY(boot_log_putchar)
+		GMAPI_ENTRY(boot_log_write)
+		GMAPI_ENTRY(boot_log_puts)
+		GMAPI_ENTRY(boot_log_printf)
+		GMAPI_ENTRY(boot_log_print_nest_padding)
+		GMAPI_ENTRY(boot_log_increase_nest_level)
+		GMAPI_ENTRY(boot_log_decrease_nest_level)
 
 	#undef GMAPI_ENTRY
 }

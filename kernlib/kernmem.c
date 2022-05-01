@@ -86,7 +86,8 @@ void* kmalloc_align(size_t size, size_t align)
 			uint64_t mem_unit_size = vmemory_get_mem_unit_size();
 			void* occupied_to_aligned = occupied_to - (uint64_t)occupied_to % mem_unit_size;
 			if((uint64_t)((nblk + sizeof(kmem_node) + size) - occupied_to_aligned) > mem_unit_size)
-				vmemory_map_alloc(occupied_to_aligned + mem_unit_size, 1, 0);
+				vmemory_map_alloc(occupied_to_aligned + mem_unit_size,
+									((uint64_t)((nblk + sizeof(kmem_node) + size) - occupied_to_aligned) + (mem_unit_size - 1)) / mem_unit_size, 0);
 		}
 		occupied_to = nblk + sizeof(kmem_node) + size;
 	}

@@ -21,6 +21,7 @@ void boot_log_printf(const char* format, ...)
 #define BOOT_LOG_STATUS_NLINE		3
 
 #define boot_log_printf_status(status, format, ...)\
+	boot_log_print_nest_padding(),\
 	boot_log_printf("%s " format "%s",\
 			  (status) == BOOT_LOG_STATUS_RUNNING ? "[....]"\
 			: (status) == BOOT_LOG_STATUS_SUCCESS ? "[ OK ]"\
@@ -29,5 +30,9 @@ void boot_log_printf(const char* format, ...)
 			: "[    ]",\
 			##__VA_ARGS__,\
 			(((status) == BOOT_LOG_STATUS_SUCCESS) | ((status) == BOOT_LOG_STATUS_FAIL) | ((status) == BOOT_LOG_STATUS_NLINE)) ? "\r\n" : "\r")
+
+void boot_log_print_nest_padding();
+void boot_log_increase_nest_level();
+void boot_log_decrease_nest_level();
 
 #endif

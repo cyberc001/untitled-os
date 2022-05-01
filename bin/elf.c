@@ -122,7 +122,11 @@ uint64_t elf_get_symbol_value(elf_header* header, const char** dependencies, elf
 				return gmapi.symbols[s];
 			}
 		}
-		elf_symbol* val_sym = elf_lookup_symbol(name, dependencies, &gmt, header, NULL, NULL); // lookup symbol in symbol string table
+		module* val_mod;
+		elf_symbol* val_sym = elf_lookup_symbol(name, dependencies, &gmt, header, NULL, &val_mod); // lookup symbol in symbol string table
+		if(val_mod){
+			*error = ELF_HINT_OTHER_MODULE;
+		}
 		if(!val_sym){
 			if(ELF_SYMBOL_INFO_BIND(*symbol) & ELF_SYMBOL_BIND_WEAK)
 				return 0;
@@ -131,7 +135,7 @@ uint64_t elf_get_symbol_value(elf_header* header, const char** dependencies, elf
 			return 0;
 		}
 		else{
-			return val_sym->value;
+			return val_sym->value + (val_mod ? (size_t)val_mod->elf_data : 0);
 		}
 	}
 	else if(symbol->hdt_index == ELF_SECT_INDEX_ABSOLUTE){ // absolute symbol; value does not change
@@ -213,10 +217,13 @@ static int elf_relocate_symbol_addend(elf_header* header, const char** dependenc
 			break;
 		case ELF_RELOC_TYPE_GLOB_DAT: // symbol (S)
 			// for some reason, it needs base offset when it does not deal with external symbols
-			*target_rel = (uint64_t)(*target_rel + symval + (uint64_t)header);
+			if(err == ELF_HINT_OTHER_MODULE)
+				*target_rel = (uint64_t)(*target_rel + symval);
+			else
+				*target_rel = (uint64_t)(*target_rel + symval + (uint64_t)header);
 			break;
 		case ELF_RELOC_TYPE_JMP_SLOT: // symbol (S)
-			if(err == ELF_HINT_MLOADER_API)
+			if(err == ELF_HINT_MLOADER_API || err == ELF_HINT_OTHER_MODULE)
 				*target_rel = symval;
 			else
 				*target_rel = (uint64_t)(symval + (uint64_t)header);

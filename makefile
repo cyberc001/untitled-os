@@ -9,7 +9,7 @@ CC_INCLUDE=-Icstdlib -I.
 CC_ARCH_FLAG=-D CPU_I386
 CC_BIT_FLAG=-D CPU_64BIT
 CC_INTERNAL_FLAGS=-std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -mabi=sysv -mno-80387 -mno-mmx -mno-3dnow -mno-sse -mno-sse2 -mno-red-zone -mcmodel=kernel -MMD
-CC_FLAGS= -g -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -fms-extensions $(CC_ARCH_FLAG) $(CC_BIT_FLAG)
+CC_FLAGS= -g -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -Wno-unused-variable -Wno-unused-but-set-variable -fms-extensions $(CC_ARCH_FLAG) $(CC_BIT_FLAG)
 CC=x86_64-elf-gcc $(CC_INCLUDE) $(CC_FLAGS) $(CC_INTERNAL_FLAGS)
 CC_MODULE=x86_64-elf-gcc $(CC_INCLUDE) $(CC_FLAGS) -ffreestanding
 LD_INTERNAL_FLAGS=-nostdlib -static
@@ -23,7 +23,7 @@ iso/myos.iso: iso/myos.bin
 		--efi-boot limine-eltorito-efi.bin \
 		-efi-boot-part --efi-boot-image --protective-msdos-label \
 		iso -o iso/myos.iso
-iso/myos.bin: kernel.o kernlib/kernmem.o cstdlib/string.o cpu/pci.o cpu/cpu_int.o cpu/cpu_init.o cpu/x86/gdt.o cpu/x86/gdt_s.o cpu/x86/idt.o cpu/x86/isr.o cpu/x86/isr_s.o cpu/x86/pic.o dev/ata.o dev/pio.o dev/uart.o fs/fs.o fs/ext2.o bin/elf.o bin/module.o log/boot_log.o
+iso/myos.bin: kernel.o kernlib/kernmem.o cstdlib/string.o cpu/pci.o cpu/cpu_int.o cpu/cpu_init.o cpu/x86/gdt.o cpu/x86/gdt_s.o cpu/x86/idt.o cpu/x86/isr.o cpu/x86/isr_s.o cpu/x86/pic.o cpu/x86/cpuid.o cpu/x86/apic.o dev/ata.o dev/pio.o dev/uart.o fs/fs.o fs/ext2.o bin/elf.o bin/module.o log/boot_log.o
 	$(LD) -T kernel.ld -o $@ $^
 
 kernel.o: kernel.c kernlib/kernmem.h kernlib/kerndefs.h cpu/pci.h cpu/cpu_mode.h dev/pio.h dev/ata.h
@@ -56,6 +56,10 @@ cpu/x86/isr.o: cpu/x86/isr.c
 cpu/x86/isr_s.o: cpu/x86/isr.s
 	$(AS) -o $@ -c $<
 cpu/x86/pic.o: cpu/x86/pic.c cpu/x86/pic.h
+	$(CC) -o $@ -c $<
+cpu/x86/cpuid.o: cpu/x86/cpuid.s cpu/x86/cpuid.h
+	$(NASM) -o $@ $<
+cpu/x86/apic.o: cpu/x86/apic.c cpu/x86/apic.h
 	$(CC) -o $@ -c $<
 
 dev/ata.o: dev/ata.c dev/ata.h
@@ -91,6 +95,7 @@ run:
 			 -smp cpus=4,threads=2 \
 			 -d int \
 			 #-S -gdb tcp::1234
+			 #--trace events=qemu_events \
 
 # test image
 img_refresh:
@@ -121,7 +126,7 @@ modules/vmemory/allocator.o: modules/vmemory/allocator.c modules/vmemory/allocat
 	$(CC_MODULE) -c $< -o $@ -fPIC
 
 # multitasking module
-modules/mtask/mtask.so: modules/mtask/mtask.o
+modules/mtask/mtask.so: modules/mtask/mtask.o modules/mtask/acpi.o modules/mtask/smp_trampoline.o
 	$(LD) -shared -fPIC -nostdlib $^ -o $@
 	-sudo umount ../mnt
 	sudo mount -o loop atest.img ../mnt
@@ -129,6 +134,10 @@ modules/mtask/mtask.so: modules/mtask/mtask.o
 	sudo umount ../mnt
 modules/mtask/mtask.o: modules/mtask/mtask.c modules/mtask/mtask.h
 	$(CC_MODULE) -c $< -o $@ -fPIC
+modules/mtask/acpi.o: modules/mtask/acpi.c modules/mtask/acpi.h
+	$(CC_MODULE) -c $< -o $@ -fPIC
+modules/mtask/smp_trampoline.o: modules/mtask/smp_trampoline.s
+	$(NASM) -o $@ $<
 
 # test module
 test_module.so: test_module.o

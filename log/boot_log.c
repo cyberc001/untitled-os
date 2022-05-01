@@ -201,3 +201,22 @@ void boot_log_printf(const char* format, ...)
 
 	va_end(args);
 }
+
+// pretty progress output
+
+static size_t nest_level = 0;
+
+void boot_log_print_nest_padding()
+{
+	for(size_t i = 0; i < nest_level; ++i)
+		boot_log_putchar('\t');
+}
+void boot_log_increase_nest_level()
+{
+	nest_level++;
+	boot_log_putchar('\n');
+}
+void boot_log_decrease_nest_level()
+{
+	nest_level--;
+}
