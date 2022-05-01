@@ -77,7 +77,6 @@ int start_ap(uint32_t lapic_id)
 				 "mov %%rax, %0" : "=m" (cr3));
 	tramp_data->page_table = cr3;
 
-	uart_printf("starting core #%u\r\n", lapic_id);
 	memcpy(conv_mem, smp_trampoline_start, smp_trampoline_size);
 
 	lapic_write(LAPIC_REG_ICR1, lapic_id << 24);

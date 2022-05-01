@@ -3,6 +3,22 @@
 
 #include <stddef.h>
 
+#define TERM_NORMAL 		"\x1b[0m"
+
+#define TERM_FGCLR_RED 		"\x1b[31m"
+#define TERM_FGCLR_GREEN 	"\x1b[32m"
+#define TERM_FGCLR_YELLOW 	"\x1b[33m"
+#define TERM_FGCLR_BLUE		"\x1b[34m"
+#define TERM_FGCLR_MAGENTA	"\x1b[35m"
+#define TERM_FGCLR_CYAN 	"\x1b[36m"
+
+#define TERM_BGCLR_RED 		"\x1b[41m"
+#define TERM_BGCLR_GREEN 	"\x1b[42m"
+#define TERM_BGCLR_YELLOW 	"\x1b[43m"
+#define TERM_BGCLR_BLUE		"\x1b[44m"
+#define TERM_BGCLR_MAGENTA	"\x1b[45m"
+#define TERM_BGCLR_CYAN 	"\x1b[46m"
+
 void boot_log_set_write_func(void (*write_func)(const char*, size_t));
 
 // raw input output
@@ -23,9 +39,9 @@ void boot_log_printf(const char* format, ...)
 #define boot_log_printf_status(status, format, ...)\
 	boot_log_print_nest_padding(),\
 	boot_log_printf("%s " format "%s",\
-			  (status) == BOOT_LOG_STATUS_RUNNING ? "[....]"\
-			: (status) == BOOT_LOG_STATUS_SUCCESS ? "[ OK ]"\
-			: (status) == BOOT_LOG_STATUS_FAIL    ? "[FAIL]"\
+			  (status) == BOOT_LOG_STATUS_RUNNING ? "[" TERM_FGCLR_YELLOW "...." TERM_NORMAL "]"\
+			: (status) == BOOT_LOG_STATUS_SUCCESS ? "[ "TERM_FGCLR_GREEN "OK" TERM_NORMAL " ]"\
+			: (status) == BOOT_LOG_STATUS_FAIL    ? "[" TERM_FGCLR_RED "FAIL" TERM_NORMAL "]"\
 			: (status) == BOOT_LOG_STATUS_NLINE	  ? "      "\
 			: "[    ]",\
 			##__VA_ARGS__,\
