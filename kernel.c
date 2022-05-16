@@ -93,6 +93,12 @@ void _start(struct stivale2_struct* stivale2_struct)
 }
 
 void boot_log_write_stub(const char* str, size_t s){}
+void ap_test()
+{
+	uart_printf("Hello AP world!\r\n");
+	for(;;)
+		asm volatile("hlt");
+}
 
 
 void kernel_main(struct stivale2_struct* stivale2_struct)
@@ -273,4 +279,13 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 		boot_log_printf_status(BOOT_LOG_STATUS_FAIL, "Initializing multitasking module: error code %d", err);
 	else
 		boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Initializing multitasking module");
+
+	/*int(*mtask_ap_jump)() = elf_get_function_module(&module_mtask, "ap_jump");
+	mtask_ap_jump(1, ap_test);
+	mtask_ap_jump(2, ap_test);
+	mtask_ap_jump(3, ap_test);*/
+
+	cpu_interrupt_set_service(ap_test, 0xA);
+	asm volatile("mov $0xA, %rax\t\n"
+				 "int $0x80");
 }

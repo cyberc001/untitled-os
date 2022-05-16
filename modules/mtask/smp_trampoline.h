@@ -23,6 +23,9 @@ typedef struct {
 	/* boot report flag: should be initialized with 0, atomically set to 1 by trampoline when AP boots */
 	uint8_t boot_flag;
 
+	/* pointer to pointer to a location to jump to after boot. The pointer should be a valid pointer before booting an AP. The pointer-value should be initialized with 0, and atomically set to a non-zero value after AP has booted */
+	uint64_t jmp_loc;
+
 	/* temporary data for real mode below: do not modify */
 } __attribute__((packed)) smp_trampoline_data;
 

@@ -19,11 +19,10 @@ void gdt_init()
 	gdt_add_desc(0, 0xFFFF, GDT_BASIC_DESC | GDT_DESC_EXECUTABLE, GDT_GRANULARITY_X32 | GDT_GRANULARITY_4K); // 32-bit code
 	gdt_add_desc(0, 0xFFFF, GDT_BASIC_DESC, GDT_GRANULARITY_X32 | GDT_GRANULARITY_4K); // 32-bit data
 	kernel_code_off = gdt_add_desc(0, 0, GDT_BASIC_DESC | GDT_DESC_EXECUTABLE, GDT_BASIC_GRANULARITY); // 64-bit code
-	kernel_data_off = gdt_add_desc(0, 0, GDT_BASIC_DESC, GDT_BASIC_GRANULARITY); // 64-bit data
+	kernel_data_off = gdt_add_desc(0, 0, GDT_BASIC_DESC, GDT_BASIC_GRANULARITY); // 64-bit data (USED BY IDT, SHOULD BE PRESENT AT FIXED LOCATION!)
 	// descriptors for user-space (CPL = 3):
 	gdt_add_desc(0, 0, GDT_BASIC_DESC | GDT_DESC_EXECUTABLE | GDT_DESC_DPL, GDT_BASIC_GRANULARITY); // 64-bit code
 	gdt_add_desc(0, 0, GDT_BASIC_DESC | GDT_DESC_DPL, GDT_BASIC_GRANULARITY); // 64-bit data
-
 	gdt_reload(&gdt_main, kernel_code_off, kernel_data_off);
 }
 

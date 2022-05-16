@@ -71,6 +71,16 @@ tramp64:
 	mov al, 0x1
 	lock xchg byte [boot_flag], al ; atomically write 1
 
+	; start the endless loop waiting for jump location
+	xor rax, rax
+	mov rbx, [jmp_loc]
+	.wait_for_jmp_loc:
+	lock xadd [rbx], rax
+	test rax, rax
+	jz .wait_for_jmp_loc
+
+	jmp [rbx]
+
 	.halt:
 	hlt
 	jmp .halt
@@ -90,6 +100,8 @@ page_table equ abs_data_off
 	dd 0
 boot_flag equ abs_data_off
 	db 0
+jmp_loc equ abs_data_off
+	dq 0
 
 ; temporary data for real mode
 tmp_gdt equ abs_data_off

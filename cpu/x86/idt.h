@@ -3,25 +3,6 @@
 
 #include <stdint.h>
 
-#ifdef CPU_32BIT
-
-typedef struct{
-	uint16_t offset_lo;
-	uint16_t seg_select;
-	uint8_t resv0;			// unused, set to 0
-	uint8_t type_attributes; 	// gate type, cpu privelege levels, present bit
-	uint16_t offset_hi;
-} __attribute__((packed)) idt_entry;
-
-#define X86_IDT_GET_OFFSET(idt_ent) ( (idt_ent).offset_lo | ((uint32_t)(idt_ent).offset_hi << 16) )
-#define X86_IDT_SET_OFFSET(idt_ent, offset)\
-{\
-	(idt_ent).offset_lo = (offset) & 0xFFFF;\
-	(idt_ent).offset_hi = ((offset) >> 16) & 0xFFFF;\
-}
-
-#elif defined CPU_64BIT
-
 typedef struct{
 	uint16_t offset_lo;
 	uint16_t seg_select;
@@ -40,8 +21,6 @@ typedef struct{
 	(idt_ent).offset_hi = ((offset) >> 32) & 0xFFFFFFFF;\
 }
 
-#endif
-
 #define IDT_VECTOR_SIZE 256
 idt_entry idt_main[IDT_VECTOR_SIZE];
 
@@ -57,7 +36,7 @@ idt_entry idt_main[IDT_VECTOR_SIZE];
 #define X86_IDT_PRIVELEGE_USER2			(0x2 << 5)
 #define X86_IDT_PRIVELEGE_USER3			(0x3 << 5)
 
-#define X86_IDT_PRESENT				(0x1 << 7)	// present bit
+#define X86_IDT_PRESENT					(0x1 << 7)	// present bit
 
 
 /* Zeroes the main IDT and sets IDTR (IDT register) to proper values.
@@ -69,5 +48,12 @@ void init_idt();
  * 1 - OK
 */
 int set_idt_gate(void (*func)(), uint64_t gate, uint8_t type_attributes);
+
+/* Sets up a basic interrupt code that calls specified function and returns
+ * Return values:
+ * 0 - gate index out of range (also if it overlaps with CPU exceptions/ISRs)
+ * 1 - OK
+*/
+int set_idt_func_call(void (*func)(), uint64_t gate, uint8_t type_attributes);
 
 #endif
