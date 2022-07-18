@@ -11,6 +11,7 @@ CC_BIT_FLAG=-D CPU_64BIT
 CC_INTERNAL_FLAGS=-std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -mabi=sysv -mno-80387 -mno-mmx -mno-3dnow -mno-sse -mno-sse2 -mno-red-zone -mcmodel=kernel -MMD
 CC_FLAGS= -g -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -Wno-unused-variable -Wno-unused-but-set-variable -fms-extensions $(CC_ARCH_FLAG) $(CC_BIT_FLAG)
 CC=x86_64-elf-gcc $(CC_INCLUDE) $(CC_FLAGS) $(CC_INTERNAL_FLAGS)
+
 CC_MODULE=x86_64-elf-gcc $(CC_INCLUDE) $(CC_FLAGS) -ffreestanding
 LD_INTERNAL_FLAGS=-nostdlib -static
 LD=x86_64-elf-ld $(LD_INTERNAL_FLAGS)
@@ -126,7 +127,7 @@ modules/vmemory/allocator.o: modules/vmemory/allocator.c modules/vmemory/allocat
 	$(CC_MODULE) -c $< -o $@ -fPIC
 
 # multitasking module
-modules/mtask/mtask.so: modules/mtask/mtask.o modules/mtask/acpi.o modules/mtask/smp_trampoline.o
+modules/mtask/mtask.so: modules/mtask/mtask.o modules/mtask/acpi.o modules/mtask/smp_trampoline.o modules/mtask/thread.o
 	$(LD) -shared -fPIC -nostdlib $^ -o $@
 	-sudo umount ../mnt
 	sudo mount -o loop atest.img ../mnt
@@ -138,6 +139,8 @@ modules/mtask/acpi.o: modules/mtask/acpi.c modules/mtask/acpi.h
 	$(CC_MODULE) -c $< -o $@ -fPIC
 modules/mtask/smp_trampoline.o: modules/mtask/smp_trampoline.s
 	$(NASM) -o $@ $<
+modules/mtask/thread.o: modules/mtask/thread.c modules/mtask/thread.h
+	$(CC_MODULE) -c $< -o $@ -fPIC
 
 # test module
 test_module.so: test_module.o

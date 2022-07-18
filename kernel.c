@@ -18,6 +18,8 @@
 #include "bin/module.h"
 #include "bin/elf.h"
 
+#include "modules/mtask/thread.h"
+
 void kernel_main();
 
 // Initial stack
@@ -99,7 +101,6 @@ void ap_test()
 	for(;;)
 		asm volatile("hlt");
 }
-
 
 void kernel_main(struct stivale2_struct* stivale2_struct)
 {
@@ -280,12 +281,19 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	else
 		boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Initializing multitasking module");
 
-	/*int(*mtask_ap_jump)() = elf_get_function_module(&module_mtask, "ap_jump");
-	mtask_ap_jump(1, ap_test);
+	int(*mtask_ap_jump)() = elf_get_function_module(&module_mtask, "ap_jump");
+	/*mtask_ap_jump(1, ap_test);
 	mtask_ap_jump(2, ap_test);
 	mtask_ap_jump(3, ap_test);*/
 
-	cpu_interrupt_set_service(ap_test, 0xA);
+	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Setting up interrupt services for ABI");
+	/*cpu_interrupt_set_service(ap_test, 0xA);
 	asm volatile("mov $0xA, %rax\t\n"
-				 "int $0x80");
+				 "int $0x80");*/
+	boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Setting up interrupt services for ABI");
+
+	void(*mtask_switch_context)() = elf_get_function_module(&module_mtask, "switch_context");
+	thread th_from;
+	mtask_switch_context(&th_from, NULL);
+	mtask_switch_context(NULL, &th_from);
 }
