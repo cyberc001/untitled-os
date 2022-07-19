@@ -292,8 +292,13 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 				 "int $0x80");*/
 	boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Setting up interrupt services for ABI");
 
-	void(*mtask_switch_context)() = elf_get_function_module(&module_mtask, "switch_context");
-	thread th_from;
-	mtask_switch_context(&th_from, NULL);
-	mtask_switch_context(NULL, &th_from);
+	void(*mtask_save_context)() = elf_get_function_module(&module_mtask, "save_context");
+	void(*mtask_load_context)() = elf_get_function_module(&module_mtask, "load_context");
+	thread th;
+	memset(&th, 0, sizeof(thread));
+	thread* th_pt = &th;
+
+	MTASK_CALL_CONTEXT_FUNC(mtask_save_context, th_pt);
+	uart_printf("RIP: %p\r\n", (void*)th.state.rip);
+	MTASK_CALL_CONTEXT_FUNC(mtask_load_context, th_pt);
 }

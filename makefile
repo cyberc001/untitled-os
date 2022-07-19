@@ -139,8 +139,8 @@ modules/mtask/acpi.o: modules/mtask/acpi.c modules/mtask/acpi.h
 	$(CC_MODULE) -c $< -o $@ -fPIC
 modules/mtask/smp_trampoline.o: modules/mtask/smp_trampoline.s
 	$(NASM) -o $@ $<
-modules/mtask/thread.o: modules/mtask/thread.c modules/mtask/thread.h
-	$(CC_MODULE) -c $< -o $@ -fPIC
+modules/mtask/thread.o: modules/mtask/thread.s modules/mtask/thread.h
+	$(NASM) -o $@ $<
 
 # test module
 test_module.so: test_module.o
