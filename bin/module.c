@@ -156,12 +156,13 @@ module_loader_api gmapi = {NULL, NULL, 0};
 #include "cpu/x86/pic.h"
 #include "cpu/x86/cpuid.h"
 #include "cpu/x86/apic.h"
+#include "cpu/x86/pit.h"
 #include "dev/pio.h"
 #include "log/boot_log.h"
 void module_init_api()
 {
 	#define GMAPI_ENTRY(sym) { size_t i = __COUNTER__; gmapi.symbols[i] = (uint64_t)(sym); gmapi.names[i] = #sym; }
-	gmapi.length = 57;
+	gmapi.length = 58;
 	gmapi.symbols = kmalloc(sizeof(uint64_t) * gmapi.length);
 	gmapi.names = kmalloc(sizeof(const char*) * gmapi.length);
 
@@ -210,6 +211,8 @@ void module_init_api()
 			GMAPI_ENTRY(apic_get_base)
 			GMAPI_ENTRY(lapic_read)
 			GMAPI_ENTRY(lapic_write)
+			// pit.h
+			GMAPI_ENTRY(pit_sleep_ms)
 	// /cstdlib
 		// string.h
 		GMAPI_ENTRY(memcpy)

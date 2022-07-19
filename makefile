@@ -24,7 +24,7 @@ iso/myos.iso: iso/myos.bin
 		--efi-boot limine-eltorito-efi.bin \
 		-efi-boot-part --efi-boot-image --protective-msdos-label \
 		iso -o iso/myos.iso
-iso/myos.bin: kernel.o kernlib/kernmem.o cstdlib/string.o cpu/pci.o cpu/cpu_int.o cpu/cpu_init.o cpu/x86/gdt.o cpu/x86/gdt_s.o cpu/x86/idt.o cpu/x86/isr.o cpu/x86/isr_s.o cpu/x86/pic.o cpu/x86/cpuid.o cpu/x86/apic.o dev/ata.o dev/pio.o dev/uart.o fs/fs.o fs/ext2.o bin/elf.o bin/module.o log/boot_log.o
+iso/myos.bin: kernel.o kernlib/kernmem.o cstdlib/string.o cpu/pci.o cpu/cpu_int.o cpu/cpu_init.o cpu/x86/gdt.o cpu/x86/gdt_s.o cpu/x86/idt.o cpu/x86/isr.o cpu/x86/isr_s.o cpu/x86/pic.o cpu/x86/cpuid.o cpu/x86/apic.o cpu/x86/pit.o dev/ata.o dev/pio.o dev/uart.o fs/fs.o fs/ext2.o bin/elf.o bin/module.o log/boot_log.o
 	$(LD) -T kernel.ld -o $@ $^
 
 kernel.o: kernel.c kernlib/kernmem.h kernlib/kerndefs.h cpu/pci.h cpu/cpu_mode.h dev/pio.h dev/ata.h
@@ -61,6 +61,8 @@ cpu/x86/pic.o: cpu/x86/pic.c cpu/x86/pic.h
 cpu/x86/cpuid.o: cpu/x86/cpuid.s cpu/x86/cpuid.h
 	$(NASM) -o $@ $<
 cpu/x86/apic.o: cpu/x86/apic.c cpu/x86/apic.h
+	$(CC) -o $@ -c $<
+cpu/x86/pit.o: cpu/x86/pit.c cpu/x86/pit.h
 	$(CC) -o $@ -c $<
 
 dev/ata.o: dev/ata.c dev/ata.h
