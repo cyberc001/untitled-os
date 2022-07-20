@@ -10,8 +10,10 @@ isr_stub_\num :
 
 .macro isr_stub_noerr num
 isr_stub_\num :
+	push %rdi
 	mov $\num, %rdi
 	call isr_exception_stub_func_noerr
+	pop %rdi
 	iretq
 .endm
 

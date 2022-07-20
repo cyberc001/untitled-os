@@ -2,6 +2,7 @@
 
 #include "cpuid.h"
 #include "cpu/cpu_io.h"
+#include "pit.h"
 
 #define APIC_BASE_MSR			0x1B
 #define APIC_BASE_MSR_ENABLE	0x800
@@ -35,3 +36,44 @@ void lapic_write(uint32_t reg, uint32_t val)
 {
 	*(volatile uint32_t *)((uintptr_t)apic_get_base() + reg) = val;
 }
+
+
+/* APIC timer */
+#define APIC_REG_TIMER_LVT			0x320
+/* Divide configurations (LSB):
+	0000	/2
+	0001	/4
+	0010	/8
+	0011	/16
+	1000	/32
+	1001	/64
+	1010	/128
+	1011	/1
+*/
+#define APIC_REG_TIMER_DIV			0x3E0
+#define APIC_REG_TIMER_INIT_COUNT	0x380
+#define APIC_REG_TIMER_CUR_COUNT	0x390
+
+/* Universally used parameters for APIC timer interface */
+#define APIC_TIMER_DIV				0x2		// :8
+#define APIC_TIMER_MEASURE			10		// amount of ms to measure
+
+void apic_set_timer(int type, size_t us, uint8_t int_gate)
+{
+	static uint32_t ticks_per_us = 0;
+	if(!ticks_per_us){ // measure amount of ticks per certain period of time
+		lapic_write(APIC_REG_TIMER_DIV, APIC_TIMER_DIV);
+		lapic_write(APIC_REG_TIMER_INIT_COUNT, 0xFFFFFFFF); // set initial counter to -1
+		pit_sleep_ms(APIC_TIMER_MEASURE);
+		lapic_write(APIC_REG_TIMER_LVT, 0x10000); // mask the timer to stop it
+		uint32_t tick_amt = 0xFFFFFFFF - lapic_read(APIC_REG_TIMER_CUR_COUNT);
+		ticks_per_us = tick_amt / 10000;
+	}
+	// start the requested timer
+	lapic_write(APIC_REG_TIMER_DIV, APIC_TIMER_DIV);
+	lapic_write(APIC_REG_TIMER_INIT_COUNT, ticks_per_us * us);
+	lapic_write(APIC_REG_TIMER_LVT, (type << 17) | int_gate);
+
+	//for(;;) uart_printf("%u\r\n", lapic_read(APIC_REG_TIMER_CUR_COUNT));
+}
+

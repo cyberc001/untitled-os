@@ -7,6 +7,7 @@
 
 #include "kernlib/kernmem.h"
 #include "kernlib/kerndefs.h"
+#include "string.h"
 
 #include "cpu/pci.h"
 #include "cpu/cpu_int.h"
@@ -19,6 +20,9 @@
 #include "bin/elf.h"
 
 #include "modules/mtask/thread.h"
+
+// TODO remove
+#include "cpu/x86/apic.h"
 
 void kernel_main();
 
@@ -100,6 +104,11 @@ void ap_test()
 	uart_printf("Hello AP world!\r\n");
 	for(;;)
 		asm volatile("hlt");
+}
+void timer_test()
+{
+	uart_printf("Time's up!\r\n");
+	lapic_write(LAPIC_REG_EOI, 0);
 }
 
 void kernel_main(struct stivale2_struct* stivale2_struct)
@@ -298,7 +307,10 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	memset(&th, 0, sizeof(thread));
 	thread* th_pt = &th;
 
-	MTASK_CALL_CONTEXT_FUNC(mtask_save_context, th_pt);
+	uart_printf("%d\r\n", cpu_interrupt_set_gate(timer_test, 48, CPU_INT_TYPE_INTERRUPT));
+	apic_set_timer(APIC_TIMER_PERIODIC, 1000 * 1000, 48);
+
+	/*MTASK_CALL_CONTEXT_FUNC(mtask_save_context, th_pt);
 	uart_printf("RIP: %p\r\n", (void*)th.state.rip);
-	MTASK_CALL_CONTEXT_FUNC(mtask_load_context, th_pt);
+	MTASK_CALL_CONTEXT_FUNC(mtask_load_context, th_pt);*/
 }
