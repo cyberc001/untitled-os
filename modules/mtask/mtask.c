@@ -6,6 +6,7 @@
 #include "cpu/x86/apic.h"
 #include "cpu/x86/pit.h"
 #include "cpu/cpu_io.h"
+#include "cpu/cpu_int.h"
 
 #include "log/boot_log.h"
 #include "dev/uart.h"
@@ -14,10 +15,15 @@
 
 #include "acpi.h"
 
+static void ap_periodic_switch()
+{
+	uart_printf("time's up\r\n");
+	lapic_write(LAPIC_REG_EOI, 0);
+}
+
 uint8_t core_num = 1, bsp_lapic_id = 0;
 void** ap_jmp_locs;
 uint8_t* lapic_ids;
-
 
 uint8_t get_core_num() { return core_num; }
 size_t get_bsp_idx()
@@ -63,7 +69,10 @@ int init()
 	boot_log_decrease_nest_level();
 	boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Detected %u APs, trying to start them", core_num - 1);
 
-	// initialize exit interrupt routine
+	//set APIC timer for task switching for BP aswell
+	/*if(!cpu_interrupt_set_gate(ap_periodic_switch, MTASK_SWITCH_TIMER_GATE, CPU_INT_TYPE_INTERRUPT))
+		return MTASK_ERR_GATE_OOB;
+	apic_set_timer(APIC_TIMER_PERIODIC, MTASK_SWITCH_TIMER_TIME, MTASK_SWITCH_TIMER_GATE);*/
 
 	return 0;
 }
@@ -85,6 +94,8 @@ int start_ap(size_t core_ind)
 
 	tramp_data->boot_flag = 0;
 	tramp_data->jmp_loc = (uintptr_t)(ap_jmp_locs + core_ind);
+
+	tramp_data->ap_timer_set_func = (uintptr_t)ap_set_timer;
 
 	memcpy(conv_mem, smp_trampoline_start, smp_trampoline_size);
 
@@ -109,6 +120,7 @@ int start_ap(size_t core_ind)
 
 	if(tries >= MTASK_AP_BOOT_TRY_COUNT)
 		return 0;
+
 	return 1;
 }
 
@@ -121,5 +133,15 @@ int ap_jump(size_t ap_idx, void* loc)
 	void* jmp_loc = &ap_jmp_locs[ap_idx];
 	asm volatile("mov %1, %%rax\n\t"
 				 "lock xchg (%0), %%rax\n\t" :: "d"(jmp_loc), "m"(loc) : "memory");
+	return 0;
+}
+
+int ap_set_timer()
+{
+	apic_enable_spurious_ints();
+
+	if(!cpu_interrupt_set_gate(ap_periodic_switch, MTASK_SWITCH_TIMER_GATE, CPU_INT_TYPE_INTERRUPT))
+		return MTASK_ERR_GATE_OOB;
+	apic_set_timer(APIC_TIMER_PERIODIC, MTASK_SWITCH_TIMER_TIME, MTASK_SWITCH_TIMER_GATE);
 	return 0;
 }

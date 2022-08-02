@@ -102,13 +102,9 @@ void boot_log_write_stub(const char* str, size_t s){}
 void ap_test()
 {
 	uart_printf("Hello AP world!\r\n");
+	asm volatile("sti");
 	for(;;)
 		asm volatile("hlt");
-}
-void timer_test()
-{
-	uart_printf("Time's up!\r\n");
-	lapic_write(LAPIC_REG_EOI, 0);
 }
 
 void kernel_main(struct stivale2_struct* stivale2_struct)
@@ -291,26 +287,22 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 		boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Initializing multitasking module");
 
 	int(*mtask_ap_jump)() = elf_get_function_module(&module_mtask, "ap_jump");
-	/*mtask_ap_jump(1, ap_test);
-	mtask_ap_jump(2, ap_test);
-	mtask_ap_jump(3, ap_test);*/
+	mtask_ap_jump(1, ap_test);
+
+	/*void(*mtask_save_context)() = elf_get_function_module(&module_mtask, "save_context");
+	void(*mtask_load_context)() = elf_get_function_module(&module_mtask, "load_context");
+	thread th;
+	memset(&th, 0, sizeof(thread));
+	thread* th_pt = &th;*/
+
+	/*MTASK_CALL_CONTEXT_FUNC(mtask_save_context, th_pt);
+	uart_printf("RIP: %p\r\n", (void*)th.state.rip);
+	MTASK_CALL_CONTEXT_FUNC(mtask_load_context, th_pt);*/
 
 	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Setting up interrupt services for ABI");
 	/*cpu_interrupt_set_service(ap_test, 0xA);
 	asm volatile("mov $0xA, %rax\t\n"
 				 "int $0x80");*/
 	boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Setting up interrupt services for ABI");
-
-	void(*mtask_save_context)() = elf_get_function_module(&module_mtask, "save_context");
-	void(*mtask_load_context)() = elf_get_function_module(&module_mtask, "load_context");
-	thread th;
-	memset(&th, 0, sizeof(thread));
-	thread* th_pt = &th;
-
-	uart_printf("%d\r\n", cpu_interrupt_set_gate(timer_test, 48, CPU_INT_TYPE_INTERRUPT));
-	apic_set_timer(APIC_TIMER_PERIODIC, 1000 * 1000, 48);
-
-	/*MTASK_CALL_CONTEXT_FUNC(mtask_save_context, th_pt);
-	uart_printf("RIP: %p\r\n", (void*)th.state.rip);
-	MTASK_CALL_CONTEXT_FUNC(mtask_load_context, th_pt);*/
 }
+

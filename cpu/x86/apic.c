@@ -37,6 +37,11 @@ void lapic_write(uint32_t reg, uint32_t val)
 	*(volatile uint32_t *)((uintptr_t)apic_get_base() + reg) = val;
 }
 
+void apic_enable_spurious_ints()
+{
+	lapic_write(LAPIC_REG_SPURIOUS_INT, lapic_read(LAPIC_REG_SPURIOUS_INT) | 0x100);
+}
+
 
 /* APIC timer */
 #define APIC_REG_TIMER_LVT			0x320

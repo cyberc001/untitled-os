@@ -67,6 +67,9 @@ tramp64:
 	mov ss, ax
 	cld
 
+	; set up APIC timer for task switching
+	call [ap_timer_set_func]
+
 	; tell BSP that this AP has booted successfully
 	mov al, 0x1
 	lock xchg byte [boot_flag], al ; atomically write 1
@@ -100,6 +103,8 @@ page_table equ abs_data_off
 	dd 0
 boot_flag equ abs_data_off
 	db 0
+ap_timer_set_func equ abs_data_off
+	dq 0
 jmp_loc equ abs_data_off
 	dq 0
 
