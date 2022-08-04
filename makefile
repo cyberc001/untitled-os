@@ -129,7 +129,7 @@ modules/vmemory/allocator.o: modules/vmemory/allocator.c modules/vmemory/allocat
 	$(CC_MODULE) -c $< -o $@ -fPIC
 
 # multitasking module
-modules/mtask/mtask.so: modules/mtask/mtask.o modules/mtask/acpi.o modules/mtask/smp_trampoline.o modules/mtask/thread.o
+modules/mtask/mtask.so: modules/mtask/mtask.o modules/mtask/acpi.o modules/mtask/smp_trampoline.o modules/mtask/thread.o modules/mtask/ap_periodic_switch.o
 	$(LD) -shared -fPIC -nostdlib $^ -o $@
 	-sudo umount ../mnt
 	sudo mount -o loop atest.img ../mnt
@@ -142,6 +142,8 @@ modules/mtask/acpi.o: modules/mtask/acpi.c modules/mtask/acpi.h
 modules/mtask/smp_trampoline.o: modules/mtask/smp_trampoline.s
 	$(NASM) -o $@ $<
 modules/mtask/thread.o: modules/mtask/thread.s modules/mtask/thread.h
+	$(NASM) -o $@ $<
+modules/mtask/ap_periodic_switch.o: modules/mtask/ap_periodic_switch.s
 	$(NASM) -o $@ $<
 
 # test module

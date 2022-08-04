@@ -74,7 +74,12 @@ tramp64:
 	mov al, 0x1
 	lock xchg byte [boot_flag], al ; atomically write 1
 
+	; write fallback
+	mov rax, .no_code_fallback
+	mov [no_code_fallback_jmp], rax
+
 	; start the endless loop waiting for jump location
+	.no_code_fallback:
 	xor rax, rax
 	mov rbx, [jmp_loc]
 	.wait_for_jmp_loc:
@@ -82,6 +87,7 @@ tramp64:
 	test rax, rax
 	jz .wait_for_jmp_loc
 
+	sti
 	jmp [rbx]
 
 	.halt:
@@ -106,6 +112,8 @@ boot_flag equ abs_data_off
 ap_timer_set_func equ abs_data_off
 	dq 0
 jmp_loc equ abs_data_off
+	dq 0
+no_code_fallback_jmp equ abs_data_off
 	dq 0
 
 ; temporary data for real mode

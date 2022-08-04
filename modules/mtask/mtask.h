@@ -13,6 +13,12 @@
 
 #define MTASK_AP_BOOT_TRY_COUNT			100 	// count of boot flag checks (with 5ms break between them)
 
+typedef struct {
+	void* jmp_loc;
+	void* no_code_fallback_jmp;
+} core_info_t;
+core_info_t* core_info;
+
 /* Initializes the module (called right after loading the module, prior to any other function calls).
 *  Return value:
 *	0			OK

@@ -13,16 +13,10 @@
 
 #include "kernlib/kernmem.h"
 
+#include "ap_periodic_switch.h"
 #include "acpi.h"
 
-static void ap_periodic_switch()
-{
-	uart_printf("time's up\r\n");
-	lapic_write(LAPIC_REG_EOI, 0);
-}
-
 uint8_t core_num = 1, bsp_lapic_id = 0;
-void** ap_jmp_locs;
 uint8_t* lapic_ids;
 
 uint8_t get_core_num() { return core_num; }
@@ -51,8 +45,8 @@ int init()
 		core_num = detect_cpus((void*)_rsdp->xsdt_addr, lapic_ids, &bsp_lapic_id);
 
 	lapic_ids = krealloc(lapic_ids, core_num);
-	ap_jmp_locs = kmalloc(core_num * sizeof(void*));
-	memset(ap_jmp_locs, 0, core_num * sizeof(void*));
+	core_info = kmalloc(core_num * sizeof(core_info_t));
+	memset(core_info, 0, core_num * sizeof(core_info_t));
 
 	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Detected %u APs, trying to start them", core_num - 1);
 	boot_log_increase_nest_level();
@@ -70,9 +64,9 @@ int init()
 	boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Detected %u APs, trying to start them", core_num - 1);
 
 	//set APIC timer for task switching for BP aswell
-	/*if(!cpu_interrupt_set_gate(ap_periodic_switch, MTASK_SWITCH_TIMER_GATE, CPU_INT_TYPE_INTERRUPT))
+	if(!cpu_interrupt_set_gate(ap_periodic_switch, MTASK_SWITCH_TIMER_GATE, CPU_INT_TYPE_INTERRUPT))
 		return MTASK_ERR_GATE_OOB;
-	apic_set_timer(APIC_TIMER_PERIODIC, MTASK_SWITCH_TIMER_TIME, MTASK_SWITCH_TIMER_GATE);*/
+	apic_set_timer(APIC_TIMER_PERIODIC, MTASK_SWITCH_TIMER_TIME, MTASK_SWITCH_TIMER_GATE);
 
 	return 0;
 }
@@ -93,7 +87,8 @@ int start_ap(size_t core_ind)
 	tramp_data->page_table = cr3;
 
 	tramp_data->boot_flag = 0;
-	tramp_data->jmp_loc = (uintptr_t)(ap_jmp_locs + core_ind);
+	tramp_data->jmp_loc = (uintptr_t)(&core_info[core_ind].jmp_loc);
+	tramp_data->no_code_fallback_jmp = (uintptr_t)(&core_info[core_ind].no_code_fallback_jmp);
 
 	tramp_data->ap_timer_set_func = (uintptr_t)ap_set_timer;
 
@@ -130,7 +125,7 @@ int ap_jump(size_t ap_idx, void* loc)
 	if(ap_idx >= core_num)
 		return MTASK_ERR_AP_IDX_DOESNT_EXIST;
 
-	void* jmp_loc = &ap_jmp_locs[ap_idx];
+	void* jmp_loc = &core_info[ap_idx].jmp_loc;
 	asm volatile("mov %1, %%rax\n\t"
 				 "lock xchg (%0), %%rax\n\t" :: "d"(jmp_loc), "m"(loc) : "memory");
 	return 0;
@@ -139,7 +134,6 @@ int ap_jump(size_t ap_idx, void* loc)
 int ap_set_timer()
 {
 	apic_enable_spurious_ints();
-
 	if(!cpu_interrupt_set_gate(ap_periodic_switch, MTASK_SWITCH_TIMER_GATE, CPU_INT_TYPE_INTERRUPT))
 		return MTASK_ERR_GATE_OOB;
 	apic_set_timer(APIC_TIMER_PERIODIC, MTASK_SWITCH_TIMER_TIME, MTASK_SWITCH_TIMER_GATE);

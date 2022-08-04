@@ -101,10 +101,13 @@ void _start(struct stivale2_struct* stivale2_struct)
 void boot_log_write_stub(const char* str, size_t s){}
 void ap_test()
 {
-	uart_printf("Hello AP world!\r\n");
-	asm volatile("sti");
-	for(;;)
-		asm volatile("hlt");
+	int i = 0;
+	for(;;){
+		//asm volatile("hlt");
+		if(!(i % 10000000))
+			uart_printf("test %d\r\n", i);
+		i++;
+	}
 }
 
 void kernel_main(struct stivale2_struct* stivale2_struct)
