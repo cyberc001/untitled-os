@@ -164,6 +164,9 @@ int init(uint64_t mem_limit)
 
 int map_alloc(void* vaddr, uint64_t usize, int flags)
 {
+	if(flags & VMEM_FLAG_SIZE_IN_BYTES)
+		usize = (usize + (get_mem_unit_size() - 1)) / get_mem_unit_size();
+
 	void* paddr = allocator_alloc(usize * PAGE_SIZE); // TODO: not always maintain continuity (configurable through flags)
 	if(paddr == (void*)-1)
 		return VMEM_ERR_NOSPACE;
@@ -182,8 +185,10 @@ int map_alloc(void* vaddr, uint64_t usize, int flags)
 
 int map_phys(void* vaddr, void* paddr, uint64_t usize, int flags)
 {
-	allocator_alloc_addr(usize * PAGE_SIZE, paddr); // TODO: add a flag for ignoring failure to allocate page frame
+	if(flags & VMEM_FLAG_SIZE_IN_BYTES)
+		usize = (usize + (get_mem_unit_size() - 1)) / get_mem_unit_size();
 
+	allocator_alloc_addr(usize * PAGE_SIZE, paddr); // TODO: add a flag for ignoring failure to allocate page frame
 	for(; usize; --usize, vaddr += PAGE_SIZE, paddr += PAGE_SIZE){
 		uint64_t* pde = make_entry(vaddr);
 		if(!pde)
@@ -197,8 +202,11 @@ int map_phys(void* vaddr, void* paddr, uint64_t usize, int flags)
 	return 0;
 }
 
-int unmap(void* vaddr, uint64_t usize)
+int unmap(void* vaddr, uint64_t usize, int flags)
 {
+	if(flags & VMEM_FLAG_SIZE_IN_BYTES)
+		usize = (usize + (get_mem_unit_size() - 1)) / get_mem_unit_size();
+
 	uint64_t* pde = get_entry(vaddr);
 	if(!pde)
 		return VMEM_NOT_MAPPED;

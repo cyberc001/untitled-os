@@ -5,11 +5,12 @@
 
 /* Virtual memory module, that utilizes paging.
 *  It tries to be as generic as possible, but main assumption is that paging well be used.
-*  To be able to fit any kind of memory model, API for a virtual memory model should define function get_mem_unit_size().
+*  To be able to fit any kind of memory model, API for a virtual memory model should utilize function get_mem_unit_size().
 */
 
-#define VMEM_PFLAG_SUPERVISOR		0b001		// U/S set: pages can only be accessed by supervisor
-#define VMEM_PLFAG_WRITE			0b010		// R/W set: pages can be written to (otherwise read-only)
+#define VMEM_FLAG_SUPERVISOR		0b001		// U/S set: pages can only be accessed by supervisor
+#define VMEM_FLAG_WRITE				0b010		// R/W set: pages can be written to (otherwise read-only)
+#define VMEM_FLAG_SIZE_IN_BYTES		0b100		// usize argument specifies size in bytes, not memory units
 
 #define VMEM_ERR_NOSPACE			-1			// Not enough free space for allocation
 #define VMEM_ERR_PHYS_OCCUPIED		-2			// Specified physical memory is already occupied
@@ -67,7 +68,7 @@ int destroy_mem_hndl(void* hndl);
 *  Arguments:
 *	vaddr - [page-aligned] virtual address to map
 *	usize - size of the memory chunk in memory units
-*	flags - page flags, see above
+*	flags - virtual memory module flags, see above
 *  Return value:
 *	0			OK
 *	non-zero	error, see error codes above
@@ -79,7 +80,7 @@ int map_alloc(void* vaddr, uint64_t usize, int flags);
 *	vaddr - [page-aligned] virtual address to map
 *	paddr - [page-aligned] physical address to map to
 *	usize - size of the memory chunk in memory units
-*	flags - page flags, see above
+*	flags - virtual memory module flags, see above
 *  Return value:
 *	0			OK
 *	non-zero	error, see error codes above
@@ -90,10 +91,11 @@ int map_phys(void* vaddr, void* paddr, uint64_t usize, int flags);
 *  Arguments:
 *	vaddr - [page-aligned] virtual address to map
 *	usize - size of the memory chunk in memory units
+*	flags - virtual memory module flags, see above
 *  Return value:
 *	0			OK
 *	non-zero	error, see error codes above
 */
-int unmap(void* vaddr, uint64_t usize);
+int unmap(void* vaddr, uint64_t usize, int flags);
 
 #endif

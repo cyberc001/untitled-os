@@ -6,6 +6,8 @@
 #include "dev/uart.h"
 #include "cstdlib/string.h"
 
+#include "modules/vmemory/vmemory.h"
+
 // Basic kernel heap memory implementation.
 
 int (*vmemory_map_alloc)(void*, uint64_t, int) = NULL;
@@ -87,7 +89,7 @@ void* kmalloc_align(size_t size, size_t align)
 			void* occupied_to_aligned = occupied_to - (uint64_t)occupied_to % mem_unit_size;
 			if((uint64_t)((nblk + sizeof(kmem_node) + size) - occupied_to_aligned) > mem_unit_size)
 				vmemory_map_alloc(occupied_to_aligned + mem_unit_size,
-									((uint64_t)((nblk + sizeof(kmem_node) + size) - occupied_to_aligned) + (mem_unit_size - 1)) / mem_unit_size, 0);
+									(uint64_t)(nblk + sizeof(kmem_node) + size) - (uint64_t)occupied_to_aligned, VMEM_FLAG_SIZE_IN_BYTES);
 		}
 		occupied_to = nblk + sizeof(kmem_node) + size;
 	}

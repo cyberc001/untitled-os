@@ -25,7 +25,7 @@ typedef struct{
 	asm volatile("call *%0" :: "m"(func_ptr));\
 	asm volatile("add %%rsp, 8" ::: "rsp");\
 }
-/* Shouldn't be called directly via C calling conventions! */
+/* Shouldn't be called directly via C calling conventions, use macro above */
 void save_context();
 void load_context();
 

@@ -21,8 +21,7 @@
 
 #include "modules/mtask/thread.h"
 
-// TODO remove
-#include "cpu/x86/apic.h"
+#include "modules/vmemory/vmemory.h"
 
 void kernel_main();
 
@@ -194,7 +193,6 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	void* kernel_mem_hndl = kmalloc(mem_hndl_size);
 	int(*create_mem_hndl)() = elf_get_function_module(&module_vmemory, "create_mem_hndl");
 	int(*select_mem_hndl)() = elf_get_function_module(&module_vmemory, "select_mem_hndl");
-	//int(*destroy_mem_hndl)() = elf_get_function_module(&module_vmemory, "destroy_mem_hndl");
 	err = create_mem_hndl(kernel_mem_hndl);
 	if(err)
 		boot_log_printf_status(BOOT_LOG_STATUS_FAIL, "Creating memory context for kernel: error code %d", err);
@@ -212,15 +210,15 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	void* kmem_heap_end = kmem_get_heap_end();
 	struct stivale2_struct_tag_kernel_base_address *kbase_tag = stivale2_get_tag(stivale2_struct, STIVALE2_STRUCT_TAG_KERNEL_BASE_ADDRESS_ID);
 
-	#define KERN_IMG_SIZE (4 * 2 * 1024 * 1024)
+	#define KERN_IMG_SIZE (8 * 1024 * 1024)
 	void* err_addr = NULL;
 	struct mmap_entry ments[] = {
 					// identity map memory heap
-					{KERN_HEAP_BASE, KERN_HEAP_BASE, (kmem_heap_end - KERN_HEAP_BASE + (vmemory_mem_unit_size - 1)) / (vmemory_mem_unit_size), 0},
+					{KERN_HEAP_BASE, KERN_HEAP_BASE, kmem_heap_end - KERN_HEAP_BASE, VMEM_FLAG_SIZE_IN_BYTES},
 					// identity map APIC base
-					{(void*)0xfee00000, (void*)0xfee00000, (0x400/*APIC_REG_SIZE*/ + (vmemory_mem_unit_size - 1)) / (vmemory_mem_unit_size), 0},
+					{(void*)0xfee00000, (void*)0xfee00000, 0x400/*APIC_REG_SIZE*/, VMEM_FLAG_SIZE_IN_BYTES},
 					// identity map kernel image
-					{(void*)kbase_tag->virtual_base_address, (void*)kbase_tag->physical_base_address, (KERN_IMG_SIZE + (vmemory_mem_unit_size - 1)) / vmemory_mem_unit_size, 0}
+					{(void*)kbase_tag->virtual_base_address, (void*)kbase_tag->physical_base_address, KERN_IMG_SIZE, VMEM_FLAG_SIZE_IN_BYTES}
 				    };
 	for(size_t i = 0; i < sizeof(ments) / sizeof(ments[0]); ++i){
 		err = vmemory_map_phys(ments[i].vaddr, ments[i].paddr, ments[i].usize, ments[i].flags);
@@ -242,7 +240,7 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 			&& addr <= (void*)kbase_tag->physical_base_address + KERN_IMG_SIZE)
 				continue;
 
-			err = vmemory_map_phys(addr, addr, (length + (vmemory_mem_unit_size - 1)) / vmemory_mem_unit_size, 0);
+			err = vmemory_map_phys(addr, addr, length, VMEM_FLAG_SIZE_IN_BYTES);
 
 			prev_addr = addr; prev_length = length;
 			if(err) {err_addr = addr; break;}
