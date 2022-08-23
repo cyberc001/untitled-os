@@ -162,7 +162,7 @@ module_loader_api gmapi = {NULL, NULL, 0};
 void module_init_api()
 {
 	#define GMAPI_ENTRY(sym) { size_t i = __COUNTER__; gmapi.symbols[i] = (uint64_t)(sym); gmapi.names[i] = #sym; }
-	gmapi.length = 60;
+	gmapi.length = 58;
 	gmapi.symbols = kmalloc(sizeof(uint64_t) * gmapi.length);
 	gmapi.names = kmalloc(sizeof(const char*) * gmapi.length);
 
@@ -207,8 +207,6 @@ void module_init_api()
 			GMAPI_ENTRY(cpuid)
 			// apic.h
 			GMAPI_ENTRY(apic_check)
-			GMAPI_ENTRY(apic_set_base)
-			GMAPI_ENTRY(apic_get_base)
 			GMAPI_ENTRY(lapic_read)
 			GMAPI_ENTRY(lapic_write)
 			GMAPI_ENTRY(apic_enable_spurious_ints)

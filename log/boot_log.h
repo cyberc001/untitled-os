@@ -35,6 +35,7 @@ void boot_log_printf(const char* format, ...)
 #define BOOT_LOG_STATUS_SUCCESS		1
 #define BOOT_LOG_STATUS_FAIL		2
 #define BOOT_LOG_STATUS_NLINE		3
+#define BOOT_LOG_STATUS_WARN		4
 
 #define boot_log_printf_status(status, format, ...)\
 	boot_log_print_nest_padding(),\
@@ -43,6 +44,7 @@ void boot_log_printf(const char* format, ...)
 			: (status) == BOOT_LOG_STATUS_SUCCESS ? "[ "TERM_FGCLR_GREEN "OK" TERM_NORMAL " ]"\
 			: (status) == BOOT_LOG_STATUS_FAIL    ? "[" TERM_FGCLR_RED "FAIL" TERM_NORMAL "]"\
 			: (status) == BOOT_LOG_STATUS_NLINE	  ? "      "\
+			: (status) == BOOT_LOG_STATUS_WARN	  ? "[" TERM_FGCLR_YELLOW "WARN" TERM_NORMAL "]"\
 			: "[    ]",\
 			##__VA_ARGS__,\
 			(((status) == BOOT_LOG_STATUS_SUCCESS) | ((status) == BOOT_LOG_STATUS_FAIL) | ((status) == BOOT_LOG_STATUS_NLINE)) ? "\r\n" : "\r")

@@ -12,7 +12,7 @@ CC_INTERNAL_FLAGS=-std=gnu11 -ffreestanding -fno-stack-protector -fno-pic -mabi=
 CC_FLAGS= -g -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -Wno-unused-variable -Wno-unused-but-set-variable -fms-extensions $(CC_ARCH_FLAG) $(CC_BIT_FLAG)
 CC=x86_64-elf-gcc $(CC_INCLUDE) $(CC_FLAGS) $(CC_INTERNAL_FLAGS)
 
-CC_MODULE=x86_64-elf-gcc $(CC_INCLUDE) $(CC_FLAGS) -ffreestanding
+CC_MODULE=x86_64-elf-gcc $(CC_INCLUDE) $(CC_FLAGS) -ffreestanding -mno-sse
 LD_INTERNAL_FLAGS=-nostdlib -static
 LD=x86_64-elf-ld $(LD_INTERNAL_FLAGS)
 
@@ -96,7 +96,7 @@ run:
 			 -drive id=disk,file=atest.img,if=ide,cache=none,format=raw \
 			 -no-reboot -no-shutdown \
 			 -smp cpus=4,threads=2 \
-			 -d int \
+			 -d int\
 			 #-S -gdb tcp::1234
 			 #--trace events=qemu_events \
 
@@ -129,7 +129,7 @@ modules/vmemory/allocator.o: modules/vmemory/allocator.c modules/vmemory/allocat
 	$(CC_MODULE) -c $< -o $@ -fPIC
 
 # multitasking module
-modules/mtask/mtask.so: modules/mtask/mtask.o modules/mtask/acpi.o modules/mtask/smp_trampoline.o modules/mtask/thread.o modules/mtask/ap_periodic_switch.o
+modules/mtask/mtask.so: modules/mtask/mtask.o modules/mtask/acpi.o modules/mtask/scheduler.o modules/mtask/process.o modules/mtask/smp_trampoline.o modules/mtask/thread.o modules/mtask/ap_periodic_switch.o
 	$(LD) -shared -fPIC -nostdlib $^ -o $@
 	-sudo umount ../mnt
 	sudo mount -o loop atest.img ../mnt
@@ -138,6 +138,10 @@ modules/mtask/mtask.so: modules/mtask/mtask.o modules/mtask/acpi.o modules/mtask
 modules/mtask/mtask.o: modules/mtask/mtask.c modules/mtask/mtask.h
 	$(CC_MODULE) -c $< -o $@ -fPIC
 modules/mtask/acpi.o: modules/mtask/acpi.c modules/mtask/acpi.h
+	$(CC_MODULE) -c $< -o $@ -fPIC
+modules/mtask/scheduler.o: modules/mtask/scheduler.c modules/mtask/scheduler.h
+	$(CC_MODULE) -c $< -o $@ -fPIC
+modules/mtask/process.o: modules/mtask/process.c modules/mtask/process.h modules/mtask/thread.h
 	$(CC_MODULE) -c $< -o $@ -fPIC
 modules/mtask/smp_trampoline.o: modules/mtask/smp_trampoline.s
 	$(NASM) -o $@ $<

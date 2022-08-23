@@ -56,10 +56,11 @@ uint64_t get_mem_unit_size() { return PAGE_SIZE; }
 typedef struct {
 	uint64_t* pml4;
 } mem_hndl;
-mem_hndl* cur_hndl;
+static mem_hndl* cur_hndl = NULL;
 
 uint64_t get_mem_hndl_size() { return sizeof(mem_hndl); }
 
+static uint64_t* get_entry(void* vaddr);
 int create_mem_hndl(void* _hndl)
 {
 	mem_hndl* hndl = _hndl;
@@ -67,10 +68,18 @@ int create_mem_hndl(void* _hndl)
 	hndl->pml4 = kmalloc_align(sizeof(uint64_t) * PML4_ENTRIES, PML4_ALIGN);
 	if(!hndl->pml4)
 		return VMEM_ERR_NOSPACE;
-	for(uint64_t i = 0; i < PML4_ENTRIES; ++i)
+
+	if(hndl->pml4 != 0x203000){
+		uart_printf("%p -- %p\r\n", (void*)cur_hndl->pml4[0], (void*)hndl->pml4[0]);
+		uart_printf("%p -- %p\r\n", (void*)cur_hndl->pml4, (void*)hndl->pml4);
+	}
+	for(uint64_t i = 0; i < PML4_ENTRIES; ++i){
 		hndl->pml4[i] = 0x0;
+	}
 	return 0;
 }
+
+void* get_current_mem_hndl() { return cur_hndl; }
 
 int select_mem_hndl(void* _hndl, int activate)
 {
@@ -155,7 +164,7 @@ static uint64_t* get_entry(void* vaddr)
 
 // Public interface
 
-int init(uint64_t mem_limit)
+int vmemory_init(uint64_t mem_limit)
 {
 	allocator_init(mem_limit);
 	return 0;

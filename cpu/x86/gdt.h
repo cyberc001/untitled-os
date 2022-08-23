@@ -48,7 +48,7 @@ typedef struct {
 } __attribute__((packed)) gdt_ptr;
 
 uint32_t gdt_add_desc(uint64_t base, uint16_t limit, uint8_t access, uint8_t granularity);
-uint32_t gdt_add_tss_desc(uint64_t rsp[3], uint64_t ist[7]);
+uint32_t gdt_add_tss_desc(gdt_tss_desc* gd);
 
 void gdt_reload(gdt_ptr* gdtr, uint16_t code, uint16_t data);
 void gdt_init();

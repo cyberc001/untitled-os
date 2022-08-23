@@ -19,9 +19,10 @@
 #include "bin/module.h"
 #include "bin/elf.h"
 
-#include "modules/mtask/thread.h"
-
 #include "modules/vmemory/vmemory.h"
+
+#include "modules/mtask/process.h"
+#include "modules/mtask/thread.h"
 
 void kernel_main();
 
@@ -93,20 +94,16 @@ struct mmap_entry{
 void _start(struct stivale2_struct* stivale2_struct)
 {
 	kernel_main(stivale2_struct);
-	for (;;)
+	for(;;)
         	asm ("hlt");
 }
 
 void boot_log_write_stub(const char* str, size_t s){}
 void ap_test()
 {
-	int i = 0;
-	for(;;){
-		//asm volatile("hlt");
-		if(!(i % 10000000))
-			uart_printf("test %d\r\n", i);
-		i++;
-	}
+	uart_printf("Scheduling test\r\n");
+	for(;;)
+		asm ("hlt");
 }
 
 void kernel_main(struct stivale2_struct* stivale2_struct)
@@ -177,12 +174,13 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	boot_log_printf_status(BOOT_LOG_STATUS_NLINE, "Memory limit: 0x%p", (void*)memory_limit);
 
 	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Initializing memory virtualization module");
-	int(*vmemory_init)() = elf_get_function_module(&module_vmemory, "init");
+	int(*vmemory_init)() = elf_get_function_module(&module_vmemory, "vmemory_init");
 	err = vmemory_init(memory_limit);
 	if(err)
 		boot_log_printf_status(BOOT_LOG_STATUS_FAIL, "Initializing memory virtualization module: error code %d", err);
 	else
 		boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Initializing memory virtualization module");
+	uart_printf("VMEMORY base: %p\r\n", module_vmemory.elf_data);
 
 	uint64_t(*vmemory_get_mem_unit_size)() = elf_get_function_module(&module_vmemory, "get_mem_unit_size");
 	uint64_t vmemory_mem_unit_size = vmemory_get_mem_unit_size();
@@ -277,9 +275,18 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	_fs.close(&_fs, modfd);
 	_fs.close(&_fs, descfd);
 
+	int(*mtask_init)() = elf_get_function_module(&module_mtask, "mtask_init");
+	void(*mtask_create_process)() = elf_get_function_module(&module_mtask, "create_process");
+	void(*mtask_load_context)() = elf_get_function_module(&module_mtask, "load_context");
+	void(*mtask_save_context)() = elf_get_function_module(&module_mtask, "save_context");
+	thread*(*mtask_process_add_thread)(process*, thread*) = elf_get_function_module(&module_mtask, "process_add_thread");
+	process*(*mtask_scheduler_add_process)(process*) = elf_get_function_module(&module_mtask, "scheduler_add_process");
+	void(*mtask_scheduler_queue_thread)(thread*) = elf_get_function_module(&module_mtask, "scheduler_queue_thread");
+
+	uart_printf("MTASK base: %p\r\n", module_mtask.elf_data);
 	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Initializing multitasking module");
 	boot_log_increase_nest_level();
-	int(*mtask_init)() = elf_get_function_module(&module_mtask, "init"); err = mtask_init();
+	err = mtask_init();
 	boot_log_decrease_nest_level();
 
 	if(err)
@@ -287,23 +294,21 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	else
 		boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Initializing multitasking module");
 
-	int(*mtask_ap_jump)() = elf_get_function_module(&module_mtask, "ap_jump");
-	mtask_ap_jump(1, ap_test);
+	//int(*mtask_ap_jump)() = elf_get_function_module(&module_mtask, "ap_jump");
+	//mtask_ap_jump(1, ap_test);
 
-	/*void(*mtask_save_context)() = elf_get_function_module(&module_mtask, "save_context");
-	void(*mtask_load_context)() = elf_get_function_module(&module_mtask, "load_context");
-	thread th;
-	memset(&th, 0, sizeof(thread));
-	thread* th_pt = &th;*/
+	process pr; mtask_create_process(&pr);
+	for(;;){}
+	thread th; memset(&th, 0, sizeof(thread));
+	thread* th_pt = &th;
+	MTASK_CALL_CONTEXT_FUNC(mtask_save_context, th_pt);
+	mtask_process_add_thread(&pr, &th);
+	mtask_scheduler_add_process(&pr);
+	mtask_scheduler_queue_thread(&th);
 
-	/*MTASK_CALL_CONTEXT_FUNC(mtask_save_context, th_pt);
-	uart_printf("RIP: %p\r\n", (void*)th.state.rip);
-	MTASK_CALL_CONTEXT_FUNC(mtask_load_context, th_pt);*/
-
-	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Setting up interrupt services for ABI");
-	/*cpu_interrupt_set_service(ap_test, 0xA);
-	asm volatile("mov $0xA, %rax\t\n"
-				 "int $0x80");*/
-	boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Setting up interrupt services for ABI");
+	/*
+	MTASK_CALL_CONTEXT_FUNC(mtask_save_context, th_pt);
+	th.state.rip = (uintptr_t)ap_test;
+	MTASK_CALL_CONTEXT_FUNC(mtask_load_context, th_pt)*/
 }
 

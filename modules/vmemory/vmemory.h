@@ -29,7 +29,7 @@
 *	0 			OK
 *	non-zero 	error, see code above
 */
-int init(uint64_t mem_limit);
+int vmemory_init(uint64_t mem_limit);
 
 /* Returns size of memory unit used (page, buddy allocator chunk, byte), in bytes. */
 uint64_t get_mem_unit_size();
@@ -53,6 +53,10 @@ int create_mem_hndl(void* hndl);
 *	non-zero 	error, see code above
 */
 int select_mem_hndl(void* hndl, int activate);
+/* Returns currently selected memory handler (not just CR3 value,
+*  but memory handler operated on by vmemory module functions.
+*/
+void* get_current_mem_hndl();
 /* Destroys (frees) a memory handler.
 *  Memory for a handler is allocated externally, using get_mem_hndl_size().
 *  Return value:

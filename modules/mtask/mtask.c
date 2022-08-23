@@ -5,6 +5,7 @@
 
 #include "cpu/x86/apic.h"
 #include "cpu/x86/pit.h"
+#include "cpu/x86/gdt.h"
 #include "cpu/cpu_io.h"
 #include "cpu/cpu_int.h"
 
@@ -15,8 +16,11 @@
 
 #include "ap_periodic_switch.h"
 #include "acpi.h"
+#include "scheduler.h"
 
-uint8_t core_num = 1, bsp_lapic_id = 0;
+#include "modules/vmemory/vmemory.h"
+
+uint8_t core_num, bsp_lapic_id;
 uint8_t* lapic_ids;
 
 uint8_t get_core_num() { return core_num; }
@@ -29,9 +33,9 @@ size_t get_bsp_idx()
 }
 
 /* 1 - success, 0 - timeout waiting on trampoline */
-int start_ap(size_t core_ind);
+int start_ap(size_t core_ind, uint32_t task_reg);
 
-int init()
+int mtask_init()
 {
 	rsdp* _rsdp = find_rsdp();
 	if(!_rsdp)
@@ -52,8 +56,19 @@ int init()
 	boot_log_increase_nest_level();
 	for(uint8_t i = 0; i < core_num; ++i){
 		if(lapic_ids[i] != bsp_lapic_id){
+			gdt_tss_desc* tr = kmalloc(sizeof(gdt_tss_desc));
+			memset(tr, 0, sizeof(*tr));
+			void* tsss = kmalloc(MTASK_TSS_STACK_SIZE);
+			tr->ist[0] = (uintptr_t)(tsss + MTASK_TSS_STACK_SIZE);
+			uint32_t gd = gdt_add_tss_desc(tr);
+			if(gd == (uint32_t)-1){
+				boot_log_decrease_nest_level();
+				boot_log_printf_status(BOOT_LOG_STATUS_FAIL, "Cannot start APs: out of space in GDT, needed for TSS");
+				boot_log_increase_nest_level();
+				break;
+			}
 			boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Starting AP #%u", lapic_ids[i]);
-			int status = start_ap(i);
+			int status = start_ap(i, gd);
 			if(!status)
 				boot_log_printf_status(BOOT_LOG_STATUS_FAIL, "Failed to start AP #%u", lapic_ids[i]);
 			else
@@ -62,23 +77,39 @@ int init()
 	}
 	boot_log_decrease_nest_level();
 	boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Detected %u APs, trying to start them", core_num - 1);
+	// set task segment register for BSP
+	gdt_tss_desc* tr = kmalloc(sizeof(gdt_tss_desc));
+	memset(tr, 0, sizeof(*tr));
+	void* tsss = kmalloc(MTASK_TSS_STACK_SIZE);
+	tr->ist[0] = (uintptr_t)(tsss + MTASK_TSS_STACK_SIZE);
+	uint32_t gd = gdt_add_tss_desc(tr);
+	if(gd == (uint32_t)-1)
+		boot_log_printf_status(BOOT_LOG_STATUS_FAIL, "Cannot set TR for BSP: out of space in GDT");
+	else{
+		uint16_t gd16 = (uint16_t)gd;
+		asm volatile("ltr %0" :: "r"(gd16));
+	}
 
-	//set APIC timer for task switching for BP aswell
+	// set APIC timer for task switching for BSP
+	print_kmem_llist(); uart_printf("-------------\r\n");
 	if(!cpu_interrupt_set_gate(ap_periodic_switch, MTASK_SWITCH_TIMER_GATE, CPU_INT_TYPE_INTERRUPT))
 		return MTASK_ERR_GATE_OOB;
-	apic_set_timer(APIC_TIMER_PERIODIC, MTASK_SWITCH_TIMER_TIME, MTASK_SWITCH_TIMER_GATE);
-
-	return 0;
+	apic_set_timer(APIC_TIMER_PERIODIC, MTASK_SWITCH_TIMER_TIME, MTASK_SWITCH_TIMER_GATE); // FIXME corrupts memory
+	print_kmem_llist();
+	return scheduler_init();
 }
 
-int start_ap(size_t core_ind)
+int start_ap(size_t core_ind, uint32_t task_reg)
 {
 	void* conv_mem = (void*)0x9000;
 	size_t smp_trampoline_size = smp_trampoline_end - smp_trampoline_start;
+	static int trampoline_is_copied = 0;
+	memcpy(conv_mem, smp_trampoline_start, smp_trampoline_size);
 
 	// use GDT, IDT and CR3 from kernel to start the core
-	smp_trampoline_data* tramp_data = (void*)smp_trampoline_start + SMP_TRAMP_DATA_OFFSET;
+	smp_trampoline_data* tramp_data = (void*)conv_mem + SMP_TRAMP_DATA_OFFSET;
 
+	tramp_data->tss = task_reg;
 	asm volatile("sgdt %0" : "=m" (tramp_data->gdt_ptr));
 	asm volatile("sidt %0" : "=m" (tramp_data->idt_ptr));
 	uint64_t cr3;
@@ -91,8 +122,6 @@ int start_ap(size_t core_ind)
 	tramp_data->no_code_fallback_jmp = (uintptr_t)(&core_info[core_ind].no_code_fallback_jmp);
 
 	tramp_data->ap_timer_set_func = (uintptr_t)ap_set_timer;
-
-	memcpy(conv_mem, smp_trampoline_start, smp_trampoline_size);
 
 	lapic_write(LAPIC_REG_ICR1, lapic_ids[core_ind] << 24);
 	lapic_write(LAPIC_REG_ICR0, LAPIC_IPI_INIT);
@@ -134,8 +163,6 @@ int ap_jump(size_t ap_idx, void* loc)
 int ap_set_timer()
 {
 	apic_enable_spurious_ints();
-	if(!cpu_interrupt_set_gate(ap_periodic_switch, MTASK_SWITCH_TIMER_GATE, CPU_INT_TYPE_INTERRUPT))
-		return MTASK_ERR_GATE_OOB;
 	apic_set_timer(APIC_TIMER_PERIODIC, MTASK_SWITCH_TIMER_TIME, MTASK_SWITCH_TIMER_GATE);
 	return 0;
 }

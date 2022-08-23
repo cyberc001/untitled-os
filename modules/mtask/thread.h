@@ -6,8 +6,10 @@
 
 #include <stdint.h>
 
+typedef struct process process;
+
 typedef struct{
-	__attribute__ ((packed)) struct{
+	__attribute__ ((packed)) __attribute__ ((aligned(16))) struct{
 		uint64_t rax, rbx, rcx, rdx, rsi, rdi;
 		uint64_t rsp, rbp;
 		uint64_t r8, r9, r10, r11, r12, r13, r14, r15;
@@ -17,6 +19,8 @@ typedef struct{
 		uint64_t dr0, dr1, dr2, dr3, dr6, dr7;
 		__attribute__ ((aligned(16))) unsigned char fx[512]; // memory for FXSAVE/FXRSTOR instructions
 	} state;
+
+	process* parent_proc;
 } thread;
 
 #define MTASK_CALL_CONTEXT_FUNC(func_ptr, stack_arg)\
@@ -30,4 +34,3 @@ void save_context();
 void load_context();
 
 #endif
-

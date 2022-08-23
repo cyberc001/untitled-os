@@ -6,11 +6,11 @@
 typedef struct{
 	uint16_t offset_lo;
 	uint16_t seg_select;
-	uint8_t ist;			// only bits 0-2 are used for Interrupt Stack Table offset
+	uint8_t ist;				// only bits 0-2 are used for Interrupt Stack Table offset
 	uint8_t type_attributes; 	// gate type, cpu privelege levels, present bit
 	uint16_t offset_lo2;
 	uint32_t offset_hi;
-	uint32_t resv0;			// reserved
+	uint32_t resv0;				// reserved
 } __attribute__((packed)) idt_entry;
 
 #define X86_IDT_GET_OFFSET(idt_ent) ( (idt_ent).offset_lo | ((uint64_t)(idt_ent).offset_lo2 << 16) | ((uint64_t)(idt_ent).offset_hi << 32) )
@@ -47,13 +47,6 @@ void init_idt();
  * 0 - gate index out of range
  * 1 - OK
 */
-int set_idt_gate(void (*func)(), uint64_t gate, uint8_t type_attributes);
-
-/* Sets up a basic interrupt code that calls specified function and returns
- * Return values:
- * 0 - gate index out of range (also if it overlaps with CPU exceptions/ISRs)
- * 1 - OK
-*/
-int set_idt_func_call(void (*func)(), uint64_t gate, uint8_t type_attributes);
+int set_idt_gate(void* val, uint64_t gate, uint8_t type_attributes);
 
 #endif

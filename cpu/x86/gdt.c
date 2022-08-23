@@ -47,22 +47,7 @@ uint32_t gdt_add_desc(uint64_t base, uint16_t limit, uint8_t access, uint8_t gra
 	return gdt_last_off - sizeof(gdt_desc);
 }
 
-uint32_t gdt_add_tss_desc(uint64_t rsp[3], uint64_t ist[7])
+uint32_t gdt_add_tss_desc(gdt_tss_desc* gd)
 {
-	if(gdt_last_off >= GDT_MAX_SIZE - sizeof(gdt_tss_desc) - 1)
-		return (uint32_t)-1;
-
-	gdt_tss_desc* tssd = (gdt_tss_desc*)(gdt + gdt_last_off);
-
-	for(size_t i = 0; i < 3; ++i)
-		tssd->rsp[i] = rsp[i];
-	for(size_t i = 0; i < 7; ++i)
-		tssd->ist[i] = ist[i];
-
-	tssd->resv0 = tssd->resv1 = tssd->resv2 = tssd->resv3 = 0;
-
-	tssd->io_map = sizeof(gdt_tss_desc); // no I/O map
-
-	gdt_last_off += sizeof(gdt_tss_desc);
-	return gdt_last_off - sizeof(gdt_tss_desc);
+	return gdt_add_desc((uintptr_t)gd, (uint16_t)sizeof(*gd), GDT_DESC_PRESENT | GDT_DESC_EXECUTABLE | GDT_DESC_ACCESS, GDT_GRANULARITY_X32);
 }

@@ -14,15 +14,10 @@ int cpu_init()
 	// TODO add proper arch #ifdefs
 	if(!cpuid_check())
 		return CPU_INITERR_NOCPUID;
-
 	if(!apic_check())
 		return CPU_INITERR_NOAPIC;
-	//lapic_write(0xD0, 0xDEADDEAD);
-	//void* new_apic_base = kmalloc_align(APIC_REG_SIZE, 0x1000);
-	//memcpy(new_apic_base, apic_get_base(), APIC_REG_SIZE);
-	//apic_set_base(new_apic_base);
-	//lapic_write(0xD0, 0xBEEFBEEF);
 
+	apic_timer_init();
 	pic_remap_irqs(0x20, 0x28);
 	gdt_init();
 
