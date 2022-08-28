@@ -22,7 +22,7 @@ void boot_log_putchar(char c)
 }
 void boot_log_write(const char* str, size_t s)
 {
-	term_write(str, s);
+	asm volatile("cli"); term_write(str, s); asm volatile("sti");
 	uart_write(str, s);
 }
 

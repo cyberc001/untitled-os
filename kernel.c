@@ -294,11 +294,7 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	else
 		boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Initializing multitasking module");
 
-	//int(*mtask_ap_jump)() = elf_get_function_module(&module_mtask, "ap_jump");
-	//mtask_ap_jump(1, ap_test);
-
 	process pr; mtask_create_process(&pr);
-	for(;;){}
 	thread th; memset(&th, 0, sizeof(thread));
 	thread* th_pt = &th;
 	MTASK_CALL_CONTEXT_FUNC(mtask_save_context, th_pt);
@@ -306,6 +302,7 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	mtask_scheduler_add_process(&pr);
 	mtask_scheduler_queue_thread(&th);
 
+	uart_printf("kernel scheduling test\r\n");
 	/*
 	MTASK_CALL_CONTEXT_FUNC(mtask_save_context, th_pt);
 	th.state.rip = (uintptr_t)ap_test;

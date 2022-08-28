@@ -1,5 +1,5 @@
-iso/boot/myos.iso
-iso/boot/myos.bin
+iso/myos.iso
+iso/myos.bin
 *.o
 */*.o
 */*/*.o

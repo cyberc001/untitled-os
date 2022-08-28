@@ -1,4 +1,5 @@
 global save_context
+global load_context
 save_context:
 	push rax
 	mov rax, [rsp+16]
@@ -74,7 +75,7 @@ load_context:
 	mov r13, [rax+104]
 	mov r14, [rax+112]
 	mov r15, [rax+120]
-	; RFLAGS !!
+	; RFLAGS
 	mov rbx, [rax+136]
 	push rbx
 	popfq

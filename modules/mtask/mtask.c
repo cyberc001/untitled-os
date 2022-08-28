@@ -91,11 +91,9 @@ int mtask_init()
 	}
 
 	// set APIC timer for task switching for BSP
-	print_kmem_llist(); uart_printf("-------------\r\n");
 	if(!cpu_interrupt_set_gate(ap_periodic_switch, MTASK_SWITCH_TIMER_GATE, CPU_INT_TYPE_INTERRUPT))
 		return MTASK_ERR_GATE_OOB;
 	apic_set_timer(APIC_TIMER_PERIODIC, MTASK_SWITCH_TIMER_TIME, MTASK_SWITCH_TIMER_GATE); // FIXME corrupts memory
-	print_kmem_llist();
 	return scheduler_init();
 }
 

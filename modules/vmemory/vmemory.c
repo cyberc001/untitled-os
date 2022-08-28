@@ -68,11 +68,6 @@ int create_mem_hndl(void* _hndl)
 	hndl->pml4 = kmalloc_align(sizeof(uint64_t) * PML4_ENTRIES, PML4_ALIGN);
 	if(!hndl->pml4)
 		return VMEM_ERR_NOSPACE;
-
-	if(hndl->pml4 != 0x203000){
-		uart_printf("%p -- %p\r\n", (void*)cur_hndl->pml4[0], (void*)hndl->pml4[0]);
-		uart_printf("%p -- %p\r\n", (void*)cur_hndl->pml4, (void*)hndl->pml4);
-	}
 	for(uint64_t i = 0; i < PML4_ENTRIES; ++i){
 		hndl->pml4[i] = 0x0;
 	}

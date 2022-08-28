@@ -16,14 +16,14 @@ void scheduler_advance_thread_queue();
 
 int scheduler_init()
 {
-	*_ts_scheduler_advance_thread_queue = (uintptr_t)scheduler_advance_thread_queue;
-
 	sched_procs_count = 0; sched_procs = NULL;
 	sched_queues = kmalloc(sizeof(thread_queue) * core_num);
 	for(size_t i = 0; i < core_num; ++i){
 		sched_queues[i].thread_count = 0; sched_queues[i].threads = NULL;
 		sched_queues[i].priority_sum = 0; sched_queues[i].current = 0;
 	}
+
+	*_ts_scheduler_advance_thread_queue = (uintptr_t)scheduler_advance_thread_queue;
 	return 0;
 }
 
@@ -59,6 +59,8 @@ void scheduler_advance_thread_queue()
 {
 	// increment current thread index, looping around when hitting the end of the queue
 	uint32_t lapic_id = lapic_read(LAPIC_REG_ID);
+	if(sched_queues[lapic_id].thread_count == 0)
+		return; // no threads: just idle
 	size_t prev_idx = sched_queues[lapic_id].current;
 	size_t cur_idx = sched_queues[lapic_id].current + 1;
 	if(cur_idx >= sched_queues[lapic_id].thread_count)
@@ -67,6 +69,7 @@ void scheduler_advance_thread_queue()
 	// switch to the current thread
 	thread* prev = &sched_queues[lapic_id].threads[prev_idx];
 	thread* cur = &sched_queues[lapic_id].threads[cur_idx];
-	//MTASK_CALL_CONTEXT_FUNC(save_context, prev);
-	//MTASK_CALL_CONTEXT_FUNC(load_context, cur);
+	void *save_context_pt = save_context, *load_context_pt = load_context;
+	MTASK_CALL_CONTEXT_FUNC(save_context_pt, prev);
+	MTASK_CALL_CONTEXT_FUNC(load_context_pt, cur);
 }
