@@ -12,7 +12,9 @@ process* sched_procs = NULL;
 thread_queue* sched_queues = NULL;
 
 extern uint64_t _ts_scheduler_advance_thread_queue[1];
-void scheduler_advance_thread_queue();
+extern uint64_t _ts_scheduler_prev_threads[1];
+thread* scheduler_advance_thread_queue();
+thread** scheduler_prev_threads;
 
 int scheduler_init()
 {
@@ -22,8 +24,11 @@ int scheduler_init()
 		sched_queues[i].thread_count = 0; sched_queues[i].threads = NULL;
 		sched_queues[i].priority_sum = 0; sched_queues[i].current = 0;
 	}
-
 	*_ts_scheduler_advance_thread_queue = (uintptr_t)scheduler_advance_thread_queue;
+	scheduler_prev_threads = kmalloc_align(sizeof(thread*) * core_num, SCHEDULER_THREAD_ALIGN);
+	for(size_t i = 0; i < core_num; ++i)
+		scheduler_prev_threads[i] = NULL;
+	*_ts_scheduler_prev_threads = (uintptr_t)scheduler_prev_threads;
 	return 0;
 }
 
@@ -37,6 +42,24 @@ process* scheduler_add_process(process* pr)
 
 void scheduler_queue_thread(thread* th)
 {
+	// TEST
+	{
+		thread_queue* min_queue = &sched_queues[0];
+		size_t min_i = 0;
+		++min_queue->thread_count;
+		min_queue->threads = krealloc_align(min_queue->threads, sizeof(thread) * min_queue->thread_count, SCHEDULER_THREAD_ALIGN);
+		min_queue->threads[min_queue->thread_count - 1] = *th;
+		min_queue->priority_sum += th->parent_proc->priority;
+		if(min_queue->thread_count == 1)
+			min_queue->current = 0;
+		if(min_queue->thread_count > 1){
+			toggle_sts(1);
+			//scheduler_prev_threads[min_i] = &min_queue->threads[0];
+		}
+		return;
+	}
+	// TEST
+
 	// find queue with minimum sum of priorities
 	unsigned min_prio = sched_queues[0].priority_sum;
 	thread_queue* min_queue = &sched_queues[0];
@@ -48,28 +71,22 @@ void scheduler_queue_thread(thread* th)
 	}
 	// add the thread to it
 	++min_queue->thread_count;
-	min_queue->threads = krealloc(min_queue->threads, sizeof(thread) * min_queue->thread_count);
+	min_queue->threads = krealloc_align(min_queue->threads, sizeof(thread) * min_queue->thread_count, SCHEDULER_THREAD_ALIGN);
 	min_queue->threads[min_queue->thread_count - 1] = *th;
 	min_queue->priority_sum += th->parent_proc->priority;
 	if(min_queue->thread_count == 1)
 		min_queue->current = 0;
 }
 
-void scheduler_advance_thread_queue()
+/* called in ap_periodic_switch.s */
+thread* scheduler_advance_thread_queue()
 {
 	// increment current thread index, looping around when hitting the end of the queue
 	uint32_t lapic_id = lapic_read(LAPIC_REG_ID);
-	if(sched_queues[lapic_id].thread_count == 0)
-		return; // no threads: just idle
-	size_t prev_idx = sched_queues[lapic_id].current;
 	size_t cur_idx = sched_queues[lapic_id].current + 1;
 	if(cur_idx >= sched_queues[lapic_id].thread_count)
 		cur_idx = 0;
 	sched_queues[lapic_id].current = cur_idx;
-	// switch to the current thread
-	thread* prev = &sched_queues[lapic_id].threads[prev_idx];
-	thread* cur = &sched_queues[lapic_id].threads[cur_idx];
-	void *save_context_pt = save_context, *load_context_pt = load_context;
-	MTASK_CALL_CONTEXT_FUNC(save_context_pt, prev);
-	MTASK_CALL_CONTEXT_FUNC(load_context_pt, cur);
+	scheduler_prev_threads[lapic_id] = &sched_queues[lapic_id].threads[cur_idx];
+	return &sched_queues[lapic_id].threads[cur_idx];
 }

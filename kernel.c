@@ -24,6 +24,8 @@
 #include "modules/mtask/process.h"
 #include "modules/mtask/thread.h"
 
+#include "cpu/x86/pit.h"
+
 void kernel_main();
 
 // Initial stack
@@ -99,11 +101,23 @@ void _start(struct stivale2_struct* stivale2_struct)
 }
 
 void boot_log_write_stub(const char* str, size_t s){}
+
+volatile int ap_test_counter = 0;
 void ap_test()
 {
-	uart_printf("Scheduling test\r\n");
-	for(;;)
-		asm ("hlt");
+	for(;;){
+		uart_printf("Scheduling test - [%d]\r\n", ap_test_counter);
+		--ap_test_counter;
+		pit_sleep_ms(10);
+	}
+}
+void ap_test2()
+{
+	for(;;){
+		uart_printf("Scheduling test + [%d]\r\n", ap_test_counter);
+		++ap_test_counter;
+		pit_sleep_ms(10);
+	}
 }
 
 void kernel_main(struct stivale2_struct* stivale2_struct)
@@ -278,7 +292,7 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	int(*mtask_init)() = elf_get_function_module(&module_mtask, "mtask_init");
 	void(*mtask_create_process)() = elf_get_function_module(&module_mtask, "create_process");
 	void(*mtask_load_context)() = elf_get_function_module(&module_mtask, "load_context");
-	void(*mtask_save_context)() = elf_get_function_module(&module_mtask, "save_context");
+	//void(*mtask_save_context)() = elf_get_function_module(&module_mtask, "save_context");
 	thread*(*mtask_process_add_thread)(process*, thread*) = elf_get_function_module(&module_mtask, "process_add_thread");
 	process*(*mtask_scheduler_add_process)(process*) = elf_get_function_module(&module_mtask, "scheduler_add_process");
 	void(*mtask_scheduler_queue_thread)(thread*) = elf_get_function_module(&module_mtask, "scheduler_queue_thread");
@@ -294,18 +308,28 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	else
 		boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Initializing multitasking module");
 
-	process pr; mtask_create_process(&pr);
-	thread th; memset(&th, 0, sizeof(thread));
-	thread* th_pt = &th;
-	MTASK_CALL_CONTEXT_FUNC(mtask_save_context, th_pt);
-	mtask_process_add_thread(&pr, &th);
-	mtask_scheduler_add_process(&pr);
-	mtask_scheduler_queue_thread(&th);
-
-	uart_printf("kernel scheduling test\r\n");
-	/*
-	MTASK_CALL_CONTEXT_FUNC(mtask_save_context, th_pt);
-	th.state.rip = (uintptr_t)ap_test;
-	MTASK_CALL_CONTEXT_FUNC(mtask_load_context, th_pt)*/
+	{ // schedule test code
+		process pr; mtask_create_process(&pr);
+		thread* th_pt = kmalloc_align(sizeof(thread), 16);
+		MTASK_SAVE_CONTEXT(th_pt);
+		th_pt->state.rip = (uintptr_t)ap_test;
+		void* ap_test_stack = kmalloc(512);
+		th_pt->state.rsp = (uintptr_t)ap_test_stack + 512;
+		mtask_process_add_thread(&pr, th_pt);
+		mtask_scheduler_add_process(&pr);
+		mtask_scheduler_queue_thread(th_pt);
+		kfree(th_pt);
+	}
+	{ // schedule test code
+		process pr; mtask_create_process(&pr);
+		thread* th_pt = kmalloc_align(sizeof(thread), 16);
+		MTASK_SAVE_CONTEXT(th_pt);
+		th_pt->state.rip = (uintptr_t)ap_test2;
+		void* ap_test_stack = kmalloc(512);
+		th_pt->state.rsp = (uintptr_t)ap_test_stack + 512;
+		mtask_process_add_thread(&pr, th_pt);
+		mtask_scheduler_add_process(&pr);
+		mtask_scheduler_queue_thread(th_pt);
+		kfree(th_pt);
+	}
 }
-

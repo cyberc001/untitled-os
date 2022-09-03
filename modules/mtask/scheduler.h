@@ -24,6 +24,8 @@ typedef struct{
 } thread_queue;
 extern thread_queue* sched_queues;
 
+#define SCHEDULER_THREAD_ALIGN 	16
+
 /* Initializes the scheduler.
 *  Return value:
 *	0			OK
@@ -47,10 +49,9 @@ process* scheduler_add_process(process* pr);
 */
 void scheduler_queue_thread(thread* th);
 
-
 /* Changes current thread in the thread queue of the current core to next one.
 *  CALLED BY AP_PERIODIC_SWITCH interrupt.
 */
-void scheduler_advance_thread_queue();
+thread* scheduler_advance_thread_queue();
 
 #endif

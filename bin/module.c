@@ -162,7 +162,7 @@ module_loader_api gmapi = {NULL, NULL, 0};
 void module_init_api()
 {
 	#define GMAPI_ENTRY(sym) { size_t i = __COUNTER__; gmapi.symbols[i] = (uint64_t)(sym); gmapi.names[i] = #sym; }
-	gmapi.length = 58;
+	gmapi.length = 59;
 	gmapi.symbols = kmalloc(sizeof(uint64_t) * gmapi.length);
 	gmapi.names = kmalloc(sizeof(const char*) * gmapi.length);
 
@@ -232,6 +232,7 @@ void module_init_api()
 		GMAPI_ENTRY(kmalloc)
 		GMAPI_ENTRY(kmalloc_align)
 		GMAPI_ENTRY(krealloc)
+		GMAPI_ENTRY(krealloc_align)
 		GMAPI_ENTRY(kfree)
 		GMAPI_ENTRY(print_kmem_llist)
 	// /log

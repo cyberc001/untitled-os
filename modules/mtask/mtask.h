@@ -52,4 +52,9 @@ int ap_jump(size_t ap_idx, void* loc);
 */
 int ap_set_timer();
 
+/* Enables or disables software task switching (the APIC interrupt itself checks the flag
+*  and immediately returns if it's zero).
+*/
+void toggle_sts(int enable);
+
 #endif

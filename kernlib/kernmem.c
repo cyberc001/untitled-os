@@ -102,8 +102,12 @@ void* kmalloc_align(size_t size, size_t align)
 
 void* krealloc(void* ptr, size_t size)
 {
+	return krealloc_align(ptr, size, 1);
+}
+void* krealloc_align(void* ptr, size_t size, size_t align)
+{
 	if(!ptr)
-		return kmalloc(size);
+		return kmalloc_align(size, align);
 
 	kmem_node* kn = ptr; kn--;
 
@@ -111,14 +115,13 @@ void* krealloc(void* ptr, size_t size)
 		void* gap_beg = ptr;
 		void* gap_end = kn->next;
 		size_t gap = gap_end - gap_beg;
-
 		if(gap >= size + sizeof(kmem_node)){
 			kn->sz = size;
 			return kn + 1;
 		}
 	}
 	// otherwise try to allocate space somewhere else
-	void* nptr = kmalloc(size);
+	void* nptr = kmalloc_align(size, align);
 	if(!nptr)
 		return NULL;
 	memcpy(nptr, ptr, kn->sz);

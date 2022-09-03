@@ -28,6 +28,7 @@ void lapic_write(uint32_t reg, uint32_t val);
 void apic_enable_spurious_ints(); // enables spurious interrupts on local APIC
 
 /* APIC timer */
+void apic_timer_init();
 #define APIC_TIMER_ONESHOT		0
 #define APIC_TIMER_PERIODIC		1
 void apic_set_timer(int type, size_t ms, uint8_t int_gate); // !! precision is up to 10ms !!

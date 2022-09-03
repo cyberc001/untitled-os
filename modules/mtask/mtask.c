@@ -77,6 +77,12 @@ int mtask_init()
 	}
 	boot_log_decrease_nest_level();
 	boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Detected %u APs, trying to start them", core_num - 1);
+
+	// init scheduler
+	int err = scheduler_init();
+	if(err)
+		return err;
+
 	// set task segment register for BSP
 	gdt_tss_desc* tr = kmalloc(sizeof(gdt_tss_desc));
 	memset(tr, 0, sizeof(*tr));
@@ -93,8 +99,9 @@ int mtask_init()
 	// set APIC timer for task switching for BSP
 	if(!cpu_interrupt_set_gate(ap_periodic_switch, MTASK_SWITCH_TIMER_GATE, CPU_INT_TYPE_INTERRUPT))
 		return MTASK_ERR_GATE_OOB;
-	apic_set_timer(APIC_TIMER_PERIODIC, MTASK_SWITCH_TIMER_TIME, MTASK_SWITCH_TIMER_GATE); // FIXME corrupts memory
-	return scheduler_init();
+	apic_set_timer(APIC_TIMER_PERIODIC, MTASK_SWITCH_TIMER_TIME, MTASK_SWITCH_TIMER_GATE);
+
+	return 0;
 }
 
 int start_ap(size_t core_ind, uint32_t task_reg)
@@ -163,4 +170,11 @@ int ap_set_timer()
 	apic_enable_spurious_ints();
 	apic_set_timer(APIC_TIMER_PERIODIC, MTASK_SWITCH_TIMER_TIME, MTASK_SWITCH_TIMER_GATE);
 	return 0;
+}
+
+
+extern uint64_t _ts_scheduler_switch_enable_flag[1];
+void toggle_sts(int enable)
+{
+	*_ts_scheduler_switch_enable_flag = enable;
 }

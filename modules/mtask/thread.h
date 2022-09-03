@@ -23,14 +23,69 @@ typedef struct{
 	process* parent_proc;
 } thread;
 
-#define MTASK_CALL_CONTEXT_FUNC(func_ptr, stack_arg)\
+#define MTASK_SAVE_CONTEXT(thread_pt)\
 {\
-	asm volatile("push %0" :: "m"(stack_arg) : "memory", "rsp");\
-	asm volatile("call *%0" :: "m"(func_ptr));\
-	asm volatile("add %%rsp, 8" ::: "rsp");\
+	__label__ __end_label;\
+	(thread_pt)->state.rip = (uintptr_t)&&__end_label;\
+	asm volatile("push %0" :: "m"(thread_pt));\
+	asm volatile(\
+	"push   %%rax\n"\
+	"mov    0x8(%%rsp),%%rax\n"\
+	"mov    %%rbx,0x8(%%rax)\n"\
+	"mov    %%rcx,0x10(%%rax)\n"\
+	"mov    %%rdx,0x18(%%rax)\n"\
+	"mov    %%rsi,0x20(%%rax)\n"\
+	"mov    %%rdi,0x28(%%rax)\n"\
+	"mov    %%rsp,0x30(%%rax)\n"\
+	"subq   $0x18,0x30(%%rax)\n"\
+	"mov    %%rbp,0x38(%%rax)\n"\
+	"mov    %%r8,0x40(%%rax)\n"\
+	"mov    %%r9,0x48(%%rax)\n"\
+	"mov    %%r10,0x50(%%rax)\n"\
+	"mov    %%r11,0x58(%%rax)\n"\
+	"mov    %%r12,0x60(%%rax)\n"\
+	"mov    %%r13,0x68(%%rax)\n"\
+	"mov    %%r14,0x70(%%rax)\n"\
+	"mov    %%r15,0x78(%%rax)\n"\
+/*"mov    0x8(%%rsp),%%rbx\n"*/\
+/*"mov    %%rbx,0x80(%%rax)\n"*/\
+	"pushfq\n"\
+	"mov    (%%rsp),%%rbx\n"\
+	"popfq\n"\
+	"mov    %%rbx,0x88(%%rax)\n"\
+	"mov    %%cr0,%%rbx\n"\
+	"mov    %%rbx,0x90(%%rax)\n"\
+	"mov    %%cr2,%%rbx\n"\
+	"mov    %%rbx,0x98(%%rax)\n"\
+	"mov    %%cr3,%%rbx\n"\
+	"mov    %%rbx,0xa0(%%rax)\n"\
+	"mov    %%cr4,%%rbx\n"\
+	"mov    %%rbx,0xa8(%%rax)\n"\
+	"mov    %%db0,%%rbx\n"\
+	"mov    %%rbx,0xb0(%%rax)\n"\
+	"mov    %%db1,%%rbx\n"\
+	"mov    %%rbx,0xb8(%%rax)\n"\
+	"mov    %%db2,%%rbx\n"\
+	"mov    %%rbx,0xc0(%%rax)\n"\
+	"mov    %%db3,%%rbx\n"\
+	"mov    %%rbx,0xc8(%%rax)\n"\
+	"mov    %%db6,%%rbx\n"\
+	"mov    %%rbx,0xd0(%%rax)\n"\
+	"mov    %%db7,%%rbx\n"\
+	"mov    %%rbx,0xd8(%%rax)\n"\
+	"fxsave 0xe0(%%rax)\n"\
+	"mov    %%rax,%%rdi\n"\
+	"pop    %%rax\n"\
+	"mov    %%rax,(%%rdi)\n"\
+	"add	$0x8, %%rsp\n"\
+	::: "memory", "rax", "rbx"\
+	);\
+	__end_label:;\
 }
-/* Shouldn't be called directly via C calling conventions, use macro above */
-void save_context();
+
+/* Shouldn't be called directly via C calling conventions.
+*  DEFINED in ap_periodic_switch.s
+*/
 void load_context();
 
 #endif

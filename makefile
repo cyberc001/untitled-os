@@ -27,7 +27,7 @@ iso/myos.iso: iso/myos.bin
 iso/myos.bin: kernel.o kernlib/kernmem.o cstdlib/string.o cpu/pci.o cpu/cpu_int.o cpu/cpu_init.o cpu/x86/gdt.o cpu/x86/gdt_s.o cpu/x86/idt.o cpu/x86/isr.o cpu/x86/isr_s.o cpu/x86/pic.o cpu/x86/cpuid.o cpu/x86/apic.o cpu/x86/pit.o dev/ata.o dev/pio.o dev/uart.o fs/fs.o fs/ext2.o bin/elf.o bin/module.o log/boot_log.o
 	$(LD) -T kernel.ld -o $@ $^
 
-kernel.o: kernel.c kernlib/kernmem.h kernlib/kerndefs.h cpu/pci.h cpu/cpu_mode.h dev/pio.h dev/ata.h
+kernel.o: kernel.c kernlib/kernmem.h kernlib/kerndefs.h cpu/pci.h cpu/cpu_mode.h dev/pio.h dev/ata.h modules/mtask/thread.h
 	$(CC) -o $@ -c $<
 
 kernlib/kernmem.o: kernlib/kernmem.c kernlib/kernmem.h kernlib/kerndefs.h
@@ -129,7 +129,7 @@ modules/vmemory/allocator.o: modules/vmemory/allocator.c modules/vmemory/allocat
 	$(CC_MODULE) -c $< -o $@ -fPIC
 
 # multitasking module
-modules/mtask/mtask.so: modules/mtask/mtask.o modules/mtask/acpi.o modules/mtask/scheduler.o modules/mtask/process.o modules/mtask/smp_trampoline.o modules/mtask/thread.o modules/mtask/ap_periodic_switch.o
+modules/mtask/mtask.so: modules/mtask/mtask.o modules/mtask/acpi.o modules/mtask/scheduler.o modules/mtask/process.o modules/mtask/smp_trampoline.o modules/mtask/ap_periodic_switch.o
 	$(LD) -shared -fPIC -nostdlib $^ -o $@
 	-sudo umount ../mnt
 	sudo mount -o loop atest.img ../mnt
@@ -144,8 +144,6 @@ modules/mtask/scheduler.o: modules/mtask/scheduler.c modules/mtask/scheduler.h
 modules/mtask/process.o: modules/mtask/process.c modules/mtask/process.h modules/mtask/thread.h
 	$(CC_MODULE) -c $< -o $@ -fPIC
 modules/mtask/smp_trampoline.o: modules/mtask/smp_trampoline.s
-	$(NASM) -o $@ $<
-modules/mtask/thread.o: modules/mtask/thread.s modules/mtask/thread.h
 	$(NASM) -o $@ $<
 modules/mtask/ap_periodic_switch.o: modules/mtask/ap_periodic_switch.s
 	$(NASM) -o $@ $<
