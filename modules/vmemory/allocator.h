@@ -17,6 +17,15 @@ void allocator_init(uint64_t mem_limit);
 */
 void* allocator_alloc(uint64_t size);
 
+/* Same as allocator_alloc, but also makes sure that physical address is aligned.
+*  Arguments:
+*  	size - size of requested continous space.
+*  	align - requested alingment.
+*  Return value:
+*	a valid pointer or (void*)-1 if there wasn't any free space of such size.
+*/
+void* allocator_alloc_align(uint64_t size, uint64_t align);
+
 /* Simlar to allocate(), but tries to mark a certain address as occupied.
 *  Arguments:
 *	size - size of requested continous space.

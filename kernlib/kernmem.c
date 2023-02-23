@@ -1,5 +1,4 @@
 #include "kernmem.h"
-#include "kerndefs.h"
 
 #include <stdint.h>
 
@@ -26,8 +25,8 @@ struct kmem_node
 	struct kmem_node* next;
 	struct kmem_node* prev;
 };
-kmem_node* kmem_head = (kmem_node*)KERN_HEAP_BASE;
-void* occupied_to = KERN_HEAP_BASE; // upper bound of memory currently mapped
+kmem_node* kmem_head = (kmem_node*)KMEM_HEAP_BASE;
+void* occupied_to = KMEM_HEAP_BASE; // upper bound of memory currently mapped
 
 void kmem_init()
 {
@@ -87,11 +86,15 @@ void* kmalloc_align(size_t size, size_t align)
 		if(vmemory_map_alloc){
 			uint64_t mem_unit_size = vmemory_get_mem_unit_size();
 			void* occupied_to_aligned = occupied_to - (uint64_t)occupied_to % mem_unit_size;
-			if((uint64_t)((nblk + sizeof(kmem_node) + size) - occupied_to_aligned) > mem_unit_size)
+			if((uint64_t)((nblk + sizeof(kmem_node) + size) - occupied_to_aligned) > mem_unit_size){
 				vmemory_map_alloc(occupied_to_aligned + mem_unit_size,
 									(uint64_t)(nblk + sizeof(kmem_node) + size) - (uint64_t)occupied_to_aligned, VMEM_FLAG_SIZE_IN_BYTES);
+			}
+			occupied_to = nblk + sizeof(kmem_node) + size;
+			occupied_to += mem_unit_size - (uint64_t)occupied_to % mem_unit_size;
 		}
-		occupied_to = nblk + sizeof(kmem_node) + size;
+		else
+			occupied_to = nblk + sizeof(kmem_node) + size;
 	}
 	it->next = nblk;
 	it->next->sz = size;
@@ -124,6 +127,7 @@ void* krealloc_align(void* ptr, size_t size, size_t align)
 	void* nptr = kmalloc_align(size, align);
 	if(!nptr)
 		return NULL;
+
 	memcpy(nptr, ptr, kn->sz);
 	kfree(ptr);
 	return nptr;

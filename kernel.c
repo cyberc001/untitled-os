@@ -6,7 +6,6 @@
 #include "log/boot_log.h"
 
 #include "kernlib/kernmem.h"
-#include "kernlib/kerndefs.h"
 #include "string.h"
 
 #include "cpu/pci.h"
@@ -226,7 +225,7 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	void* err_addr = NULL;
 	struct mmap_entry ments[] = {
 					// identity map memory heap
-					{KERN_HEAP_BASE, KERN_HEAP_BASE, kmem_heap_end - KERN_HEAP_BASE, VMEM_FLAG_SIZE_IN_BYTES},
+					{KMEM_HEAP_BASE, KMEM_HEAP_BASE, kmem_heap_end - KMEM_HEAP_BASE, VMEM_FLAG_SIZE_IN_BYTES},
 					// identity map APIC base
 					{(void*)0xfee00000, (void*)0xfee00000, 0x400/*APIC_REG_SIZE*/, VMEM_FLAG_SIZE_IN_BYTES},
 					// identity map kernel image

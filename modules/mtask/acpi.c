@@ -4,8 +4,8 @@
 #include "cpu/x86/cpuid.h"
 #include "dev/uart.h"
 
-#define RSDP_SEARCH_START	(void*)0xE0000
-#define RSDP_SEARCH_END   	(void*)0xFFFFF
+#define RSDP_SEARCH_START	((void*)0xE0000)
+#define RSDP_SEARCH_END   	((void*)0xFFFFF)
 
 extern int map_phys(void* vaddr, void* paddr, uint64_t usize, int flags);
 extern uint64_t get_mem_unit_size();
@@ -20,6 +20,10 @@ static uint8_t calc_chksum(void* bytes, size_t ln)
 
 rsdp* find_rsdp()
 {
+	void* rsdp_aligned = RSDP_SEARCH_START - (uintptr_t)RSDP_SEARCH_START % get_mem_unit_size();
+	size_t rsdp_sz = (RSDP_SEARCH_END - RSDP_SEARCH_START) + (uintptr_t)RSDP_SEARCH_START % get_mem_unit_size();
+	map_phys(rsdp_aligned, rsdp_aligned, (rsdp_sz + (get_mem_unit_size() - 1)) / get_mem_unit_size(), 0);
+
 	for(void* ptr = RSDP_SEARCH_START; ptr < RSDP_SEARCH_END; ptr += 16){
 		if(!memcmp("RSD PTR ", ptr, 8)){
 			rsdp* _rsdp = ptr;
@@ -49,7 +53,7 @@ uint8_t detect_cpus(uint8_t* rsdt, uint8_t* lapic_ids, uint8_t* bsp_lapic_id)
 
 	void* rsdt_aligned = rsdt - (uintptr_t)rsdt % get_mem_unit_size();
 	size_t rsdt_sz = 4096 + (uintptr_t)rsdt % get_mem_unit_size();
-	int err = map_phys(rsdt_aligned, rsdt_aligned, (rsdt_sz + (get_mem_unit_size() - 1)) / get_mem_unit_size(), 0);
+	map_phys(rsdt_aligned, rsdt_aligned, (rsdt_sz + (get_mem_unit_size() - 1)) / get_mem_unit_size(), 0);
 
 	for(ln = *((uint32_t*)(rsdt + 4)) /*uint32_t length field*/, ent_end = rsdt + 36;
 		ent_end < rsdt + ln;

@@ -8,9 +8,10 @@
 *  To be able to fit any kind of memory model, API for a virtual memory model should utilize function get_mem_unit_size().
 */
 
-#define VMEM_FLAG_SUPERVISOR		0b001		// U/S set: pages can only be accessed by supervisor
-#define VMEM_FLAG_WRITE				0b010		// R/W set: pages can be written to (otherwise read-only)
-#define VMEM_FLAG_SIZE_IN_BYTES		0b100		// usize argument specifies size in bytes, not memory units
+#define VMEM_FLAG_SUPERVISOR				0b0001		// U/S set: pages can only be accessed by supervisor
+#define VMEM_FLAG_WRITE						0b0010		// R/W set: pages can be written to (otherwise read-only)
+#define VMEM_FLAG_SIZE_IN_BYTES				0b0100		// usize argument specifies size in bytes, not memory unit
+#define VMEM_FLAG_MAINTAIN_CONTINUITY		0b1000		// allocate a continous chunk of memory (only affects map_alloc)
 
 #define VMEM_ERR_NOSPACE			-1			// Not enough free space for allocation
 #define VMEM_ERR_PHYS_OCCUPIED		-2			// Specified physical memory is already occupied

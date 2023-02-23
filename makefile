@@ -27,10 +27,10 @@ iso/myos.iso: iso/myos.bin
 iso/myos.bin: kernel.o kernlib/kernmem.o cstdlib/string.o cpu/pci.o cpu/cpu_int.o cpu/cpu_init.o cpu/x86/gdt.o cpu/x86/gdt_s.o cpu/x86/idt.o cpu/x86/isr.o cpu/x86/isr_s.o cpu/x86/pic.o cpu/x86/cpuid.o cpu/x86/apic.o cpu/x86/pit.o dev/ata.o dev/pio.o dev/uart.o fs/fs.o fs/ext2.o bin/elf.o bin/module.o log/boot_log.o
 	$(LD) -T kernel.ld -o $@ $^
 
-kernel.o: kernel.c kernlib/kernmem.h kernlib/kerndefs.h cpu/pci.h cpu/cpu_mode.h dev/pio.h dev/ata.h modules/mtask/thread.h
+kernel.o: kernel.c kernlib/kernmem.h cpu/pci.h cpu/cpu_mode.h dev/pio.h dev/ata.h modules/mtask/thread.h
 	$(CC) -o $@ -c $<
 
-kernlib/kernmem.o: kernlib/kernmem.c kernlib/kernmem.h kernlib/kerndefs.h
+kernlib/kernmem.o: kernlib/kernmem.c kernlib/kernmem.h
 	$(CC) -o $@ -c $<
 
 log/boot_log.o: log/boot_log.c log/boot_log.h

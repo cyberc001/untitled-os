@@ -64,6 +64,8 @@ node* alloc_tree_rotate(node* p, int dir);
 
 #define alloc_tree_find_first_fit(size) alloc_tree_find_first_fit_r(alloc_tree.root, size)
 node* alloc_tree_find_first_fit_r(node* n, uint64_t size);
+#define alloc_tree_find_first_fit_align(size, align) alloc_tree_find_first_fit_align_r(alloc_tree.root, size, align)
+node* alloc_tree_find_first_fit_align_r(node* n, uint64_t size, uint64_t align);
 node* alloc_tree_find(void* addr);
 node* alloc_tree_find_containing(void* addr, uint64_t size);
 
@@ -83,7 +85,6 @@ void allocator_init(uint64_t memory_limit)
 	TREE_SET_CLR(alloc_tree.root, TREE_CLR_BLACK);
 }
 
-
 void* allocator_alloc(uint64_t size)
 {
 	node* n = alloc_tree_find_first_fit(size);
@@ -101,6 +102,35 @@ void* allocator_alloc(uint64_t size)
 		void* ret = n->addr;
 		TREE_SET_SIZE(n, TREE_GET_SIZE(n) - size);
 		n->addr += size;
+		return ret;
+	}
+}
+
+void* allocator_alloc_align(uint64_t size, uint64_t align)
+{
+	node* n = alloc_tree_find_first_fit_align(size, align);
+	if(n == (void*)-1)
+		return n;
+
+	uint64_t align_off = align - (uintptr_t)n->addr % align;
+	if(align_off == align)
+		align_off = 0;
+	if(TREE_GET_SIZE(n) - align_off == size)
+	{ // perfect fit
+		void* ret = n->addr + align_off;
+		alloc_tree_delete(n);
+		return ret;
+	}
+	else
+	{ // n->size > size, shrinking the free space and shifting addr up
+		if(align_off > 0){ // add another node, since selected address doesn't align and it splits the free space into 2 parts
+			node* _new = alloc_node();
+			_new->addr = n->addr; TREE_SET_SIZE(_new, align_off);
+			alloc_tree_insert(_new);
+		}
+		void* ret = n->addr + align_off;
+		TREE_SET_SIZE(n, TREE_GET_SIZE(n) - size - align_off);
+		n->addr += size + align_off;
 		return ret;
 	}
 }
@@ -165,12 +195,12 @@ void allocator_free(void* addr, uint64_t size)
 	node* merge_l = _new->child[TREE_DIR_LEFT] ? merge_lr(_new->child[TREE_DIR_LEFT], addr) : NULL;
 	node* merge_r = _new->child[TREE_DIR_RIGHT] ? merge_rr(_new->child[TREE_DIR_RIGHT], addr, size) : NULL;
 
-	if(merge_l != (void*)-1){
+	if(merge_l){
 		_new->addr = merge_l->addr;
 		TREE_SET_SIZE(_new, TREE_GET_SIZE(_new) + TREE_GET_SIZE(merge_l));
 		alloc_tree_delete(merge_l);
 	}
-	if(merge_r != (void*)-1){
+	if(merge_r){
 		TREE_SET_SIZE(_new, TREE_GET_SIZE(_new) + TREE_GET_SIZE(merge_r));
 		alloc_tree_delete(merge_r);
 	}
@@ -389,12 +419,26 @@ node* alloc_tree_find_first_fit_r(node* n, uint64_t size)
 		return n;
 
 	if(n->child[TREE_DIR_LEFT])
-	{ node* nn = alloc_tree_find_first_fit_r(n->child[TREE_DIR_LEFT], size); if(nn) return nn; }
+	{ node* nn = alloc_tree_find_first_fit_r(n->child[TREE_DIR_LEFT], size); if(nn != (void*)-1) return nn; }
 	if(n->child[TREE_DIR_RIGHT])
-	{ node* nn = alloc_tree_find_first_fit_r(n->child[TREE_DIR_RIGHT], size); if(nn) return nn; }
+	{ node* nn = alloc_tree_find_first_fit_r(n->child[TREE_DIR_RIGHT], size); if(nn != (void*)-1) return nn; }
 
 	return (void*)-1;
 }
+int stack_depth = 0;
+node* alloc_tree_find_first_fit_align_r(node* n, uint64_t size, uint64_t align)
+{
+	if(TREE_GET_SIZE(n) - (align - (uintptr_t)n->addr % align) >= size)
+		return n;
+
+	if(n->child[TREE_DIR_LEFT])
+	{ node* nn = alloc_tree_find_first_fit_align_r(n->child[TREE_DIR_LEFT], size, align); if(nn != (void*)-1) return nn; }
+	if(n->child[TREE_DIR_RIGHT])
+	{ node* nn = alloc_tree_find_first_fit_align_r(n->child[TREE_DIR_RIGHT], size, align); if(nn != (void*)-1) return nn; }
+
+	return (void*)-1;
+}
+
 /* BT traversal by addr */
 node* alloc_tree_find(void* addr)
 {
