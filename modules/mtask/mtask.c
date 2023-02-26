@@ -74,6 +74,8 @@ int mtask_init()
 			else
 				boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Starting AP #%u", lapic_ids[i]);
 		}
+		else
+			core_info[i].flags = MTASK_CORE_FLAG_BSP;
 	}
 	boot_log_decrease_nest_level();
 	boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Detected %u APs, trying to start them", core_num - 1);

@@ -14,11 +14,14 @@
 #define MTASK_AP_BOOT_TRY_COUNT			100 	// count of boot flag checks (with 5ms break between them)
 #define MTASK_TSS_STACK_SIZE			1024
 
+#define MTASK_CORE_FLAG_BSP				0b1
+
 extern uint8_t core_num, bsp_lapic_id;
 
 typedef struct {
 	void* jmp_loc;
 	void* no_code_fallback_jmp;
+	int flags;
 } core_info_t;
 core_info_t* core_info;
 

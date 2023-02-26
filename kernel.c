@@ -105,17 +105,33 @@ volatile int ap_test_counter = 0;
 void ap_test()
 {
 	for(;;){
-		uart_printf("Scheduling test - [%d]\r\n", ap_test_counter);
+		//uart_printf("Scheduling test 0- [%d]\r\n", ap_test_counter);
 		--ap_test_counter;
-		pit_sleep_ms(10);
+		pit_sleep_ms(100);
+	}
+}
+void ap_test1()
+{
+	for(;;){
+		//uart_printf("Scheduling test 1+ [%d]\r\n", ap_test_counter);
+		++ap_test_counter;
+		pit_sleep_ms(100);
 	}
 }
 void ap_test2()
 {
 	for(;;){
-		uart_printf("Scheduling test + [%d]\r\n", ap_test_counter);
+		//uart_printf("Scheduling test 2- [%d]\r\n", ap_test_counter);
+		--ap_test_counter;
+		pit_sleep_ms(100);
+	}
+}
+void ap_test3()
+{
+	for(;;){
+		//uart_printf("Scheduling test 3+ [%d]\r\n", ap_test_counter);
 		++ap_test_counter;
-		pit_sleep_ms(10);
+		pit_sleep_ms(100);
 	}
 }
 
@@ -307,11 +323,17 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	else
 		boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Initializing multitasking module");
 
+	for(size_t i = 0; i < 8; ++i)
 	{ // schedule test code
 		process pr; mtask_create_process(&pr);
 		thread* th_pt = kmalloc_align(sizeof(thread), 16);
 		MTASK_SAVE_CONTEXT(th_pt);
-		th_pt->state.rip = (uintptr_t)ap_test;
+		switch(i % 4){
+			case 0: th_pt->state.rip = (uintptr_t)(ap_test); break;
+			case 1: th_pt->state.rip = (uintptr_t)(ap_test1); break;
+			case 2: th_pt->state.rip = (uintptr_t)(ap_test2); break;
+			case 3: th_pt->state.rip = (uintptr_t)(ap_test3); break;
+		}
 		void* ap_test_stack = kmalloc(512);
 		th_pt->state.rsp = (uintptr_t)ap_test_stack + 512;
 		mtask_process_add_thread(&pr, th_pt);
@@ -319,16 +341,6 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 		mtask_scheduler_queue_thread(th_pt);
 		kfree(th_pt);
 	}
-	{ // schedule test code
-		process pr; mtask_create_process(&pr);
-		thread* th_pt = kmalloc_align(sizeof(thread), 16);
-		MTASK_SAVE_CONTEXT(th_pt);
-		th_pt->state.rip = (uintptr_t)ap_test2;
-		void* ap_test_stack = kmalloc(512);
-		th_pt->state.rsp = (uintptr_t)ap_test_stack + 512;
-		mtask_process_add_thread(&pr, th_pt);
-		mtask_scheduler_add_process(&pr);
-		mtask_scheduler_queue_thread(th_pt);
-		kfree(th_pt);
-	}
+	void(*toggle_sts)(int) = elf_get_function_module(&module_mtask, "toggle_sts");
+	toggle_sts(1);
 }

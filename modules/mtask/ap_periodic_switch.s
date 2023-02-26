@@ -14,6 +14,12 @@ ap_periodic_switch:
 	pushfq
 	push rax
 	push rbx
+	; registers below are modified by scheduler_advance_queue() (they are caller-saved by C calling convention), and should be preserved when queue doesn't advance (one thread active for logical CPU).
+	; note that only actually modified registers are saved (according to mtask.so disassembly) to shed CPU cycles.
+	push rcx
+	push rdx
+	push rsi
+	push rdi
 
 	; signal the APIC controller so timer interrupts won't stop
 	xor rax, rax
@@ -26,6 +32,10 @@ ap_periodic_switch:
 	test rax, rax
 	jnz .sts_enabled
 
+	pop rdi
+	pop rsi
+	pop rdx
+	pop rcx
 	pop rbx
 	pop rax
 	popfq
@@ -38,19 +48,20 @@ ap_periodic_switch:
 	xor rbx, rbx
 	mov rbx, 0xFEE00020
 	mov eax, [rbx]
+	shr rax, 24
 
 	; save context to the previous thread state
 	mov rbx, _ts_scheduler_prev_threads
-	mov rbx, [rbx+rax*8]
 	mov rbx, [rbx]
+	mov rbx, [rbx+rax*8]
 	test rbx, rbx
 	jz .end_ctx_save
 
-	mov rax, [rsp+8]	; rax
-	mov [rbx], rax		; rax
-	mov rax, [rsp]		; rbx
-	mov [rbx+8], rax	; rbx
-	add rsp, 24
+	mov rax, [rsp+40]	; get rax from stack
+	mov [rbx], rax
+	mov rax, [rsp+32]	; get rbx from stack
+	mov [rbx+8], rax
+	add rsp, 56			; restore rsp pointer to what it was before interrupt (7 registers saved on stack * 8 bytes)
 	mov [rbx+16], rcx
 	mov [rbx+24], rdx
 	mov [rbx+32], rsi
@@ -106,14 +117,21 @@ ap_periodic_switch:
 	call rax			; try to switch to a new thread
 
 	test rax, rax		; test if switch actually was performed
+	jz .end_switch		; if it wasn't (for example, there are 0 threads), then just return
 	push rax
 	call load_context 	; load context from a new thread
 	add rsp, 8
 
+	.end_switch
+	pop rdi
+	pop rsi
+	pop rdx
+	pop rcx
+	pop rbx
+	pop rax
 	popfq
 	sti
 	iretq
-
 
 global load_context
 load_context:
