@@ -5,6 +5,8 @@
 
 #include "allocator.h"
 
+#include "bits.h"
+
 /* IA-32e paging */
 
 #define PFLAG_PRESENT			(1 << 0)
@@ -21,12 +23,6 @@
 #define PFLAG_GLOBAL			(1 << 8)	// if 1, translation is global (not invalidated in TLB)
 #define PFLAG_PAT				(1 << 12)
 #define PFLAG_XD				(1 << 63)	// if 1, does not allow instruction fetches from this page (if CPU supports it)
-
-
-#define GET_BITS_LAST(expr, amt)		((uint64_t)(expr) & ((1 << (amt)) - 1))
-#define GET_BITS(expr, start, end)		GET_BITS_LAST((uint64_t)(expr) >> (start), (end) - (start))
-
-#define SET_BITS(expr, bits, start)		{ (expr) = (__typeof__(expr))((uint64_t)(expr) | (bits) << (start)); }
 
 // PML4:
 uint64_t* pml4;

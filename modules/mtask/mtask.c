@@ -6,6 +6,8 @@
 #include "cpu/x86/apic.h"
 #include "cpu/x86/pit.h"
 #include "cpu/x86/gdt.h"
+#include "cpu/x86/rsdp.h"
+#include "cpu/x86/hpet.h"
 #include "cpu/cpu_io.h"
 #include "cpu/cpu_int.h"
 
@@ -37,16 +39,18 @@ int start_ap(size_t core_ind, uint32_t task_reg);
 
 int mtask_init()
 {
-	rsdp* _rsdp = find_rsdp();
+	size_t hpet_timer_blocks_cnt;
+	hpet_desc_table** hpet_timer_blocks = hpet_get_timer_blocks(&hpet_timer_blocks_cnt);
+	uart_printf("COUNTER_CLK_PERIOD: %lu fs\r\n", HPET_COUNTER_CLK_PERIOD(HPET_READ_REG(hpet_timer_blocks[0]->base_addr.addr, HPET_GENREG_CAP_ID)));
+	HPET_SET_ENABLE_CNF(HPET_PTR_REG(hpet_timer_blocks[0]->base_addr.addr, HPET_GENREG_CONF)); // enable timer 0
+
+	rsdp* _rsdp = find_rsdp(get_mem_unit_size());
 	if(!_rsdp)
 		return MTASK_ERR_CANT_FIND_RSDP;
 
 	lapic_ids = kmalloc(256);
 
-	if(_rsdp->revision < 2)
-		core_num = detect_cpus((void*)(uintptr_t)_rsdp->rsdt_addr, lapic_ids, &bsp_lapic_id);
-	else
-		core_num = detect_cpus((void*)_rsdp->xsdt_addr, lapic_ids, &bsp_lapic_id);
+	core_num = detect_cpus(RSDP_GET_PTR(_rsdp), lapic_ids, &bsp_lapic_id);
 
 	lapic_ids = krealloc(lapic_ids, core_num);
 	core_info = kmalloc(core_num * sizeof(core_info_t));

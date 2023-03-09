@@ -20,6 +20,8 @@ typedef struct{
 		__attribute__ ((aligned(16))) unsigned char fx[512]; // memory for FXSAVE/FXRSTOR instructions
 	} state;
 
+	uint64_t vruntime;
+	uint64_t weight;
 	process* parent_proc;
 } thread;
 

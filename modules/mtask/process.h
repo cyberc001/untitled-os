@@ -13,9 +13,6 @@ struct process{
 
 	size_t thread_cnt;
 	thread* threads;
-
-	unsigned priority;	// the more priority the more time slices it's threads recieve.
-						// taken into account when first adding a thread or rebalancing queues.
 };
 
 /* Creates a new process that doesn't contain anything (but has a valid memory handle).

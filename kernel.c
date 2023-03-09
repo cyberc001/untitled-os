@@ -24,6 +24,8 @@
 #include "modules/mtask/thread.h"
 
 #include "cpu/x86/pit.h"
+#include "cpu/x86/rsdp.h"
+#include "cpu/x86/hpet.h"
 
 void kernel_main();
 
@@ -273,6 +275,9 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 			if(err) {err_addr = addr; break;}
 		}
 	}
+	// TODO segregate this initialization into a separate cpu_init function that runs post identity mapping
+	map_rsdp(vmemory_map_phys, vmemory_mem_unit_size);
+	hpet_init(vmemory_map_phys, vmemory_mem_unit_size);
 
 	if(err){
 		boot_log_printf_status(BOOT_LOG_STATUS_FAIL, "Identity mapping module loader: error code %d", err);
@@ -309,7 +314,6 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	void(*mtask_load_context)() = elf_get_function_module(&module_mtask, "load_context");
 	//void(*mtask_save_context)() = elf_get_function_module(&module_mtask, "save_context");
 	thread*(*mtask_process_add_thread)(process*, thread*) = elf_get_function_module(&module_mtask, "process_add_thread");
-	process*(*mtask_scheduler_add_process)(process*) = elf_get_function_module(&module_mtask, "scheduler_add_process");
 	void(*mtask_scheduler_queue_thread)(thread*) = elf_get_function_module(&module_mtask, "scheduler_queue_thread");
 
 	uart_printf("MTASK base: %p\r\n", module_mtask.elf_data);
@@ -336,10 +340,10 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 		}
 		void* ap_test_stack = kmalloc(512);
 		th_pt->state.rsp = (uintptr_t)ap_test_stack + 512;
-		mtask_process_add_thread(&pr, th_pt);
-		mtask_scheduler_add_process(&pr);
+		th_pt->weight = 1024 + 128 * i;
+		//mtask_process_add_thread(&pr, th_pt);
 		mtask_scheduler_queue_thread(th_pt);
-		kfree(th_pt);
+		//kfree(th_pt);
 	}
 	void(*toggle_sts)(int) = elf_get_function_module(&module_mtask, "toggle_sts");
 	toggle_sts(1);

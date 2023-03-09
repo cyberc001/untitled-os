@@ -7,7 +7,6 @@ void create_process(process* pr)
 	pr->memory_hndl = kmalloc(get_mem_hndl_size());
 	create_mem_hndl(pr->memory_hndl);
 	pr->thread_cnt = 0; pr->threads = NULL;
-	pr->priority = 1;
 }
 
 thread* process_add_thread(process* pr, thread* th)

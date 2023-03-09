@@ -207,13 +207,13 @@ void allocator_free(void* addr, uint64_t size)
 }
 
 
-// RB tree functions
+/* RB tree functions */
 
 void alloc_tree_insert(node* n)
 {
 	node* root = alloc_tree.root;
 	if(!root){
-		TREE_SET_CLR(n, TREE_CLR_RED);
+		TREE_SET_CLR(n, TREE_CLR_BLACK);
 		n->child[TREE_DIR_LEFT] = n->child[TREE_DIR_RIGHT] = NULL;
 		n->parent = NULL;
 		alloc_tree.root = n;
@@ -241,7 +241,7 @@ void alloc_tree_insertp(node* n, node* p, int dir)
 	n->child[TREE_DIR_LEFT] = n->child[TREE_DIR_RIGHT] = NULL;
 	n->parent = p;
 	if(!p) // inserting at root
-	{ alloc_tree.root = n; return; }
+	{ TREE_SET_CLR(n, TREE_CLR_BLACK); alloc_tree.root = n; return; }
 
 	p->child[dir] = n;
 
@@ -462,7 +462,7 @@ node* alloc_tree_find_containing(void* addr, uint64_t size)
 	return (void*)-1;
 }
 
-// RB tree helper functions
+/* RB tree helper functions */
 
 node* alloc_tree_rotate(node* p, int dir)
 {
