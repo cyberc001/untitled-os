@@ -3,8 +3,10 @@
 #include "mtask.h"
 #include "string.h"
 #include "kernlib/kernmem.h"
+#include "log/boot_log.h"
 #include "dev/uart.h"
 #include "cpu/x86/apic.h"
+#include "cpu/x86/hpet.h"
 
 #define TREE_CLR_BLACK 	0
 #define TREE_CLR_RED 	1
@@ -15,9 +17,7 @@
 #define TREE_DIR_CHILD(n) ((n) == ((n)->parent)->child[TREE_DIR_RIGHT] ? TREE_DIR_RIGHT : TREE_DIR_LEFT)
 #define TREE_GET_SIBLING(n) ((n)->parent ? (n)->parent->child[TREE_DIR_CHILD(n)] : NULL)
 
-#define TREE_FREE_NODE(n) { kfree((n)->thr); kfree(n); }
 #define thread_tree_print(tree) thread_tree_print_r((tree)->root, 0)
-
 
 typedef struct node node;
 struct node {
@@ -30,6 +30,7 @@ struct node {
 typedef struct {
 	node* root;
 	uint64_t thread_cnt;
+	uint8_t cpu_num;
 } thread_tree;
 thread_tree* cpu_trees;
 thread_tree** cpu_tree_heap; // organized as a binary heap with fixed size
@@ -41,6 +42,10 @@ thread** scheduler_prev_threads;
 
 void thread_tree_print_r(node* n, unsigned depth);
 
+static void* timer_addr;
+static uint64_t* timer_prev_val;
+static uint64_t timer_res_ns;
+
 int scheduler_init()
 {
 	cpu_trees = kmalloc(sizeof(thread_tree) * core_num);
@@ -49,6 +54,7 @@ int scheduler_init()
 		thread_tree* t = cpu_trees + i;
 		t->thread_cnt = 0;
 		t->root = NULL;
+		t->cpu_num = i;
 		cpu_tree_heap[i] = t;
 	}
 
@@ -58,7 +64,25 @@ int scheduler_init()
 	for(uint8_t i = 0; i < core_num; ++i)
 		scheduler_prev_threads[i] = NULL;
 	*_ts_scheduler_prev_threads = (uintptr_t)scheduler_prev_threads;
+
+	size_t hpet_timer_blocks_cnt;
+	hpet_desc_table** hpet_timer_blocks = hpet_get_timer_blocks(&hpet_timer_blocks_cnt);
+	timer_addr = (void*)hpet_timer_blocks[0]->base_addr.addr;
+	timer_res_ns = HPET_COUNTER_CLK_PERIOD(HPET_READ_REG(timer_addr, HPET_GENREG_CAP_ID));
+	if(timer_res_ns < 1000000) // clock period is in femtoseconds (10^-15), nanoseconds are 10^-9
+		boot_log_printf_status(BOOT_LOG_STATUS_WARN, "HPET clock period is less than a nanosecond (%lu fs), using timer value for vruntime instead of nanoseconds", timer_res_ns);
+	else
+		timer_res_ns /= 1000000;
+
+	timer_prev_val = kmalloc(sizeof(uint64_t) * core_num);
 	return 0;
+}
+
+void sync_timers()
+{
+	uint64_t timer_val = HPET_READ_REG(timer_addr, HPET_GENREG_COUNTER);
+	for(uint8_t i = 0; i < core_num; ++i)
+		timer_prev_val[i] = timer_val;
 }
 
 /* Thread tree binary heap functions */
@@ -282,7 +306,7 @@ static void thread_tree_delete_fixbb(thread_tree* tree, node* n) // fix 2 black 
 	}
 }
 
-static void thread_tree_delete(thread_tree* tree, node* n)
+static node* thread_tree_delete(thread_tree* tree, node* n)
 {
 	while(n)
 	{
@@ -304,16 +328,16 @@ static void thread_tree_delete(thread_tree* tree, node* n)
 				// delete n
 				p->child[TREE_DIR_CHILD(n)] = NULL;
 			}
-			TREE_FREE_NODE(n);
-			return;
+			return n;
 		}
+		
 		if(!n->child[TREE_DIR_LEFT] || !n->child[TREE_DIR_RIGHT]){
 			// n has only 1 child
 			if(n == tree->root)
 			{ // replace n with it's child if n == root
 				n->thr = u->thr;
 				n->child[TREE_DIR_LEFT] = n->child[TREE_DIR_RIGHT] = NULL;
-				TREE_FREE_NODE(u);
+				return u;
 			}
 			else
 			{ // delete n from the tree and move u up
@@ -323,9 +347,8 @@ static void thread_tree_delete(thread_tree* tree, node* n)
 					thread_tree_delete_fixbb(tree, n);
 				else
 					u->clr = TREE_CLR_BLACK;
-				TREE_FREE_NODE(n);
+				return n;
 			}
-			return;
 		}
 		// swap u and n
 		node tmp;
@@ -334,6 +357,7 @@ static void thread_tree_delete(thread_tree* tree, node* n)
 		u->thr = tmp.thr;
 		n = u;
 	}
+	return NULL;
 }
 
 void thread_tree_print_r(node* n, unsigned depth)
@@ -373,28 +397,12 @@ void scheduler_queue_thread(thread* th)
 		th->vruntime = 0;
 	// Find a tree with least amount of jobs (using binary heap)
 	thread_tree_add(cpu_tree_heap[0], th);
-	//thread_tree_print(cpu_tree_heap[0]);
 	cpu_tree_heap_update_smallest();
-	/*
-	// find queue with minimum sum of priorities
-	unsigned min_prio = sched_queues[0].priority_sum;
-	thread_queue* min_queue = &sched_queues[0];	
-	size_t core_i = 0;
-	for(size_t i = 1; i < core_num; ++i){
-		if(sched_queues[i].priority_sum < min_prio){
-			min_prio = sched_queues[i].priority_sum;
-			min_queue = &sched_queues[i];
-			core_i = i;
-		}
-	}
-	// add the thread to it
-	++min_queue->thread_count;
-	if(min_queue->thread_count == 1) min_queue->current = 0;
-	min_queue->threads = krealloc_align(min_queue->threads, sizeof(thread) * min_queue->thread_count, SCHEDULER_THREAD_ALIGN);
-	min_queue->threads[min_queue->thread_count - 1] = *th;
-	min_queue->priority_sum += th->parent_proc->priority;
+
+	// this AP jump is only needed so the core actually gets initialized and starts getting task switch interrupts
+	uint8_t core_i = cpu_tree_heap[0]->cpu_num;
 	if(!(core_info[core_i].flags & MTASK_CORE_FLAG_BSP) && !core_info[core_i].jmp_loc)
-		ap_jump(core_i, endless_loop);*/
+		ap_jump(core_i, endless_loop);
 }
 
 /* called in ap_periodic_switch.s */
@@ -402,24 +410,32 @@ static uint64_t ts_time_left = 0; // tracks time before an actual task switch
 thread* scheduler_advance_thread_queue()
 {
 	uint32_t lapic_id = lapic_read(LAPIC_REG_ID) >> 24;
-	node* root = cpu_trees[lapic_id].root;
+
+	// Measure time passed since last interrupt
+	uint64_t timer_val = HPET_READ_REG(timer_addr, HPET_GENREG_COUNTER);
+	uint64_t prev_val = timer_prev_val[lapic_id];
+	uint64_t time_passed;
+	if(prev_val > timer_val)
+		time_passed = (uint64_t)-1 - prev_val + timer_val;
+	else
+		time_passed = timer_val - prev_val;
+	timer_prev_val[lapic_id] = timer_val;
+
+	// Find thread with minimum vruntime
+	thread_tree* tree = &cpu_trees[lapic_id];
+	node* root = tree->root;
 	if(!root) return NULL;
 	while(root->child[TREE_DIR_LEFT])
 		root = root->child[TREE_DIR_LEFT];
-	uart_printf("\r\nminimum: %lu\r\n", root->thr->vruntime);
+	uart_printf("[%u] minimum: %lu %p\r\n", lapic_id, root->thr->vruntime, root->thr);
+	// Incement it's runtime and re-insert it in the tree
+	root->thr->vruntime += time_passed * timer_res_ns;
+	node root_cpy = *root;
+	node* root_addr = thread_tree_delete(tree, root);
+	*root_addr = root_cpy;
+	thread_tree_insert(tree, root_addr);
+	thread_tree_print(tree);
 
-	/*
-	// increment current thread index, looping around when hitting the end of the queue
-	uint32_t lapic_id = lapic_read(LAPIC_REG_ID) >> 24;
-	size_t cur_idx = sched_queues[lapic_id].current + 1;
-	if(cur_idx >= sched_queues[lapic_id].thread_count)
-		cur_idx = 0;
-	if(sched_queues[lapic_id].thread_count == 0)
-		return NULL;
-
-	uart_printf("\r\nadvancing to %lu for CPU#%u\r\n", cur_idx, lapic_id);
-	sched_queues[lapic_id].current = cur_idx;
-	scheduler_prev_threads[lapic_id] = &sched_queues[lapic_id].threads[cur_idx];
-	return &sched_queues[lapic_id].threads[cur_idx];*/
-	return NULL;
+	scheduler_prev_threads[lapic_id] = root_addr->thr;
+	return root_addr->thr;
 }

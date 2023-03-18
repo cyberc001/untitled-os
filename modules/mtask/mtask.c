@@ -182,5 +182,7 @@ int ap_set_timer()
 extern uint64_t _ts_scheduler_switch_enable_flag[1];
 void toggle_sts(int enable)
 {
+	if(enable)
+		sync_timers();
 	*_ts_scheduler_switch_enable_flag = enable;
 }

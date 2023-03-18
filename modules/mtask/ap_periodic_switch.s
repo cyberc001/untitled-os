@@ -60,7 +60,7 @@ ap_periodic_switch:
 	mov rax, [rsp+40]	; get rax from stack
 	mov [rbx], rax
 	mov rax, [rsp+32]	; get rbx from stack
-	mov [rbx+8], rax
+	mov [rbx+8], rax	; rbx
 	add rsp, 56			; restore rsp pointer to what it was before interrupt (7 registers saved on stack * 8 bytes)
 	mov [rbx+16], rcx
 	mov [rbx+24], rdx
@@ -122,7 +122,7 @@ ap_periodic_switch:
 	call load_context 	; load context from a new thread
 	add rsp, 8
 
-	.end_switch
+	.end_switch:
 	pop rdi
 	pop rsi
 	pop rdx

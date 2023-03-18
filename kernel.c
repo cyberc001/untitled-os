@@ -187,6 +187,15 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	void *modfd = kmalloc(_fs.fd_size), *descfd = kmalloc(_fs.fd_size);
 	_fs.open(&_fs, modfd, "vmemory.so", FS_OPEN_READ);
 	_fs.open(&_fs, descfd, "vmemory.dsc", FS_OPEN_READ);
+
+	/*char buf[128];
+	uart_printf("INIT READ\r\n");
+	uart_printf("READ: %lu\r\n", _fs.read(&_fs, modfd, buf, 128));
+	uart_printf("\r\nBUFFER:\r\n");
+	for(size_t i = 0; i < 128; ++i)
+		uart_printf("%x ", buf[0]);
+	uart_printf("\r\n");*/
+
 	err = module_load_kernmem(&module_vmemory, &_fs, modfd, descfd);
 	if(err)
 		boot_log_printf_status(BOOT_LOG_STATUS_FAIL, "Loading memory virtualization module: error code %d", err);

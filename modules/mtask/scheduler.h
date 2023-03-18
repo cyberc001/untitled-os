@@ -30,4 +30,7 @@ void scheduler_queue_thread(thread* th);
 */
 thread* scheduler_advance_thread_queue();
 
+/* Called by toggle_sts() function in mtask.h for syncing timers' previous values. */
+void sync_timers();
+
 #endif
