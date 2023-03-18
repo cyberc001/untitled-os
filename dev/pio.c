@@ -26,7 +26,6 @@ size_t pio_read(ata_drive* drive, uint64_t lba, size_t count, void* buf)
 		cpu_out8(drive->base + ATA_REG_LBA2, lba >> (8 * 5) & 0xFF);
 	}
 
-	// TODO: wtf with LBA3-5 ?
 	cpu_out8(drive->base + ATA_REG_SECCOUNT0, count & 0xFF);
 	cpu_out8(drive->base + ATA_REG_LBA0, lba >> (8 * 0) & 0xFF);
 	cpu_out8(drive->base + ATA_REG_LBA1, lba >> (8 * 1) & 0xFF);

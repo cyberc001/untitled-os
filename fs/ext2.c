@@ -67,7 +67,7 @@ void fs_ext2_read_inode(ata_drive* drive, fs_ext2_sb* sb, fs_ext2_blkgrp_table* 
 	void* buf = kmalloc(FS_EXT2_SB_BLOCKSIZE(*sb));
 	drive->read(drive, (bt->groups[blkgrp].inode_table_addr + baddr) * FS_EXT2_SB_BLOCKSECTORS(*sb),
 			FS_EXT2_SB_BLOCKSECTORS(*sb), buf);
-	memcpy(_out, buf + sb->inode_size * tind, sb->inode_size);
+	memcpy(_out, buf + (sb->inode_size * tind) % FS_EXT2_SB_BLOCKSIZE(*sb), sb->inode_size);
 
 	kfree(buf);
 }
@@ -78,9 +78,8 @@ uint32_t fs_ext2_get_inode_pointer(ata_drive* drive, fs_ext2_sb* sb, fs_ext2_ino
 {
 	#define DBP_PER_BLOCK (FS_EXT2_SB_BLOCKSIZE(*sb) / sizeof(inode->dbp[0]))
 
-	if(bind < 12) { // accessing a DBP
+	if(bind < 12) // accessing a DBP
 		return inode->dbp[bind];
-	}
 	else if(bind < 12 + DBP_PER_BLOCK){ // accessing a SIBP
 		if(!inode->sibp) return 0;
 		drive->read(drive, inode->sibp * FS_EXT2_SB_BLOCKSECTORS(*sb),
@@ -586,9 +585,8 @@ typedef struct{
 } gfs_ext2_gdata;
 
 typedef struct{
-	// general info
-	fs_ext2_inode inode;
 	uint32_t inode_num;
+	fs_ext2_inode* inode;
 
 	// read/write pointer
 	struct{
@@ -736,11 +734,7 @@ static int fs_ext2_find_final_inode(file_system* fs, const char* path,
 		}
 	}
 
-	// make sure to read root directory if it's the sole filesystem object in the path
-	if(cur_inode_num == FS_EXT2_ROOT_INODE)
-		fs_ext2_read_inode(fs->drive, &gdat->sb, &gdat->bt, cur_inode_num, _out);
-	else // else read the file inode number that was found above is pointing to
-		fs_ext2_read_inode(fs->drive, &gdat->sb, &gdat->bt, cur_inode_num, _out);
+	fs_ext2_read_inode(fs->drive, &gdat->sb, &gdat->bt, cur_inode_num, _out);
 	*_num_out = cur_inode_num;
 	kfree(it_buf); kfree(path_buf_fptr);
 	return 0;
@@ -1127,21 +1121,28 @@ static int fs_ext2_open(file_system* fs, void* fd, const char* path, int flags)
 	gfs_ext2_fd* _fd = (gfs_ext2_fd*)fd;
 
 	_fd->ptr.is_buf_init = 0;
+	_fd->inode = kmalloc(gdat->sb.inode_size);
 
-	int err = fs_ext2_find_final_inode(fs, path, &_fd->inode, &_fd->inode_num);
+	int err = fs_ext2_find_final_inode(fs, path, _fd->inode, &_fd->inode_num);
 	if(err){
 		if(err == FS_ERR_DOESNT_EXIST
 		&& (flags & FS_OPEN_CREATE) && (flags & FS_OPEN_WRITE))
 		{
 			err = fs_ext2_create(fs, path, FS_CREATE_TYPE_FILE);
-			if(err)
+			if(err){
+				kfree(_fd->inode);
 				return err;
-			err = fs_ext2_find_final_inode(fs, path, &_fd->inode, &_fd->inode_num);
-			if(err)
+			}
+			err = fs_ext2_find_final_inode(fs, path, _fd->inode, &_fd->inode_num);
+			if(err){
+				kfree(_fd->inode);
 				return err;
+			}
 		}
-		else
+		else{
+			kfree(_fd->inode);
 			return err;
+		}
 	}
 
 	_fd->ptr.blkbuf = kmalloc(FS_EXT2_SB_BLOCKSIZE(gdat->sb));
@@ -1151,21 +1152,21 @@ static int fs_ext2_open(file_system* fs, void* fd, const char* path, int flags)
 		// mark all dedicated blocks as free, and set corresponding pointers to zero
 		uint32_t ptr;
 		for(uint32_t blki = 0;
-			(ptr = fs_ext2_get_inode_pointer(fs->drive, &gdat->sb, &_fd->inode, blki, _fd->ptr.blkbuf));
+			(ptr = fs_ext2_get_inode_pointer(fs->drive, &gdat->sb, _fd->inode, blki, _fd->ptr.blkbuf));
 			++blki)
 		{
 			fs_ext2_write_inode_block_pointer(fs->drive, &gdat->sb, &gdat->bt,
-								&_fd->inode, _fd->inode_num, blki, 0);
+								_fd->inode, _fd->inode_num, blki, 0);
 			fs_ext2_mark_unalloc_block(fs->drive, &gdat->sb, &gdat->bt, ptr);
 		}
-		FS_EXT2_INODE_SET_SIZE(_fd->inode, 0);
-		fs_ext2_write_inode(fs->drive, &gdat->sb, &gdat->bt, _fd->inode_num, &_fd->inode);
+		FS_EXT2_INODE_SET_SIZE(*_fd->inode, 0);
+		fs_ext2_write_inode(fs->drive, &gdat->sb, &gdat->bt, _fd->inode_num, _fd->inode);
 	}
 
 	_fd->ptr.is_blk_valid = 1;
 	if(flags & FS_OPEN_ENDPTR){
 		uint32_t blki; for(blki = 0;
-			(fs_ext2_get_inode_pointer(fs->drive, &gdat->sb, &_fd->inode, blki, _fd->ptr.blkbuf));
+			(fs_ext2_get_inode_pointer(fs->drive, &gdat->sb, _fd->inode, blki, _fd->ptr.blkbuf));
 			++blki)
 			;
 		if(blki)
@@ -1174,14 +1175,14 @@ static int fs_ext2_open(file_system* fs, void* fd, const char* path, int flags)
 			_fd->ptr.is_blk_valid = 0;
 
 		_fd->ptr.blki = blki;
-		_fd->ptr.byteaddr = FS_EXT2_INODE_GET_SIZE(_fd->inode) % FS_EXT2_SB_BLOCKSIZE(gdat->sb);
+		_fd->ptr.byteaddr = FS_EXT2_INODE_GET_SIZE(*_fd->inode) % FS_EXT2_SB_BLOCKSIZE(gdat->sb);
 		if(_fd->ptr.byteaddr == 0)
 			_fd->ptr.is_blk_valid = 0; // pointing to the last, non-allocated block pointer
 	}
 	else{
 		_fd->ptr.blki = 0;
 		_fd->ptr.byteaddr = 0;
-		if(!fs_ext2_get_inode_pointer(fs->drive, &gdat->sb, &_fd->inode, 0, _fd->ptr.blkbuf))
+		if(!fs_ext2_get_inode_pointer(fs->drive, &gdat->sb, _fd->inode, 0, _fd->ptr.blkbuf))
 			_fd->ptr.is_blk_valid = 0;
 	}
 
@@ -1195,6 +1196,7 @@ static void fs_ext2_close(file_system* fs, void* fd)
 {
 	gfs_ext2_fd* _fd = (gfs_ext2_fd*)fd;
 	kfree(_fd->ptr.blkbuf);
+	kfree(_fd->inode);
 }
 
 // ++++++++++
@@ -1203,7 +1205,7 @@ static void fs_ext2_close(file_system* fs, void* fd)
 static size_t fs_ext2_get_size(file_system* fs, void* fd)
 {
 	gfs_ext2_fd* _fd = (gfs_ext2_fd*)fd;
-	return FS_EXT2_INODE_GET_SIZE(_fd->inode);
+	return FS_EXT2_INODE_GET_SIZE(*_fd->inode);
 }
 
 // +++++
@@ -1222,12 +1224,12 @@ static long fs_ext2_seek(file_system* fs, void* fd, long offset, int whence)
 	}
 	else if(whence & FS_SEEK_END){
 		for(blki = 0;
-			(fs_ext2_get_inode_pointer(fs->drive, &gdat->sb, &_fd->inode, blki, _fd->ptr.blkbuf));
+			(fs_ext2_get_inode_pointer(fs->drive, &gdat->sb, _fd->inode, blki, _fd->ptr.blkbuf));
 			++blki)
 			;
 		if(blki)
 			--blki;
-		byteaddr = FS_EXT2_INODE_GET_SIZE(_fd->inode) % FS_EXT2_SB_BLOCKSIZE(gdat->sb);
+		byteaddr = FS_EXT2_INODE_GET_SIZE(*_fd->inode) % FS_EXT2_SB_BLOCKSIZE(gdat->sb);
 	}
 	else{ // FS_SEEK_BEGIN
 		blki = 0;
@@ -1241,9 +1243,9 @@ static long fs_ext2_seek(file_system* fs, void* fd, long offset, int whence)
 		{ // handling integer overflow
 			offset = UINT32_MAX - bytes;
 		}
-		if(bytes > FS_EXT2_INODE_GET_SIZE(_fd->inode) - offset)
+		if(bytes > FS_EXT2_INODE_GET_SIZE(*_fd->inode) - offset)
 		{ // handling seeking past file
-			offset = FS_EXT2_INODE_GET_SIZE(_fd->inode) - bytes;
+			offset = FS_EXT2_INODE_GET_SIZE(*_fd->inode) - bytes;
 		}
 	}
 	else if(offset < 0){
@@ -1271,13 +1273,13 @@ static size_t fs_ext2_read(file_system* fs, void* fd, void* buf, size_t count)
 
 	// do not allow reading past file, trimming the result
 	uint32_t bytes = _fd->ptr.blki * FS_EXT2_SB_BLOCKSIZE(gdat->sb) + _fd->ptr.byteaddr;
-	count = count > FS_EXT2_INODE_GET_SIZE(_fd->inode) - bytes ?
-				FS_EXT2_INODE_GET_SIZE(_fd->inode) - bytes :
+	count = count > FS_EXT2_INODE_GET_SIZE(*_fd->inode) - bytes ?
+				FS_EXT2_INODE_GET_SIZE(*_fd->inode) - bytes :
 				count;
 
 	if(!_fd->ptr.is_buf_init){
 		// try to read first chunk of data
-		if(!fs_ext2_read_inode_data(fs->drive, &gdat->sb, &_fd->inode, _fd->ptr.blki, _fd->ptr.blkbuf)){
+		if(!fs_ext2_read_inode_data(fs->drive, &gdat->sb, _fd->inode, _fd->ptr.blki, _fd->ptr.blkbuf)){
 			_fd->ptr.is_blk_valid = 0;
 			return 0;
 		}
@@ -1294,7 +1296,7 @@ static size_t fs_ext2_read(file_system* fs, void* fd, void* buf, size_t count)
 			// read the whole block, moving to next one
 			_fd->ptr.blki++;
 			_fd->ptr.byteaddr = 0;
-			if(!fs_ext2_read_inode_data(fs->drive, &gdat->sb, &_fd->inode, _fd->ptr.blki, _fd->ptr.blkbuf)){
+			if(!fs_ext2_read_inode_data(fs->drive, &gdat->sb, _fd->inode, _fd->ptr.blki, _fd->ptr.blkbuf)){
 				// can't read any further, triggering previous if condition
 				_fd->ptr.is_blk_valid = 0;
 				continue;
@@ -1330,25 +1332,25 @@ static size_t fs_ext2_write(file_system* fs, void* fd, const void* buf, size_t c
 			uint32_t new_ptr = fs_ext2_find_unalloc_block(fs->drive, &gdat->sb, &gdat->bt,
 									(_fd->inode_num - 1) / gdat->sb.inodes_per_group);
 			if(new_ptr == ((uint32_t)-1)){ // no space left
-				FS_EXT2_INODE_SET_SIZE(_fd->inode, FS_EXT2_INODE_GET_SIZE(_fd->inode) + (count - left));
-				fs_ext2_write_inode(fs->drive, &gdat->sb, &gdat->bt, _fd->inode_num, &_fd->inode);
+				FS_EXT2_INODE_SET_SIZE(*_fd->inode, FS_EXT2_INODE_GET_SIZE(*_fd->inode) + (count - left));
+				fs_ext2_write_inode(fs->drive, &gdat->sb, &gdat->bt, _fd->inode_num, _fd->inode);
 				return count - left;
 			}
 
 			// mark block as allocated and write new pointer to inode
 			fs_ext2_mark_alloc_block(fs->drive, &gdat->sb, &gdat->bt, new_ptr);
-			fs_ext2_write_inode_block_pointer(fs->drive, &gdat->sb, &gdat->bt, &_fd->inode, _fd->inode_num,
+			fs_ext2_write_inode_block_pointer(fs->drive, &gdat->sb, &gdat->bt, _fd->inode, _fd->inode_num,
 								_fd->ptr.blki, new_ptr);
 			_fd->ptr.is_blk_valid = 1;
 		}
 		if(_fd->ptr.byteaddr == FS_EXT2_SB_BLOCKSIZE(gdat->sb)){
 			// wrote the whole block, flushing the changes to disk
-			fs_ext2_write_inode_data(fs->drive, &gdat->sb, &_fd->inode, _fd->ptr.blki, _fd->ptr.blkbuf);
+			fs_ext2_write_inode_data(fs->drive, &gdat->sb, _fd->inode, _fd->ptr.blki, _fd->ptr.blkbuf);
 
 			// moving to next block
 			_fd->ptr.blki++;
 			_fd->ptr.byteaddr = 0;
-			if(!fs_ext2_read_inode_data(fs->drive, &gdat->sb, &_fd->inode, _fd->ptr.blki, _fd->ptr.blkbuf)){
+			if(!fs_ext2_read_inode_data(fs->drive, &gdat->sb, _fd->inode, _fd->ptr.blki, _fd->ptr.blkbuf)){
 				// can't write any further, triggering previous if condition
 				_fd->ptr.is_blk_valid = 0;
 				continue;
@@ -1364,10 +1366,10 @@ static size_t fs_ext2_write(file_system* fs, void* fd, const void* buf, size_t c
 		left -= tocopy;
 	}
 	// one more write for the last block
-	fs_ext2_write_inode_data(fs->drive, &gdat->sb, &_fd->inode, _fd->ptr.blki, _fd->ptr.blkbuf);
+	fs_ext2_write_inode_data(fs->drive, &gdat->sb, _fd->inode, _fd->ptr.blki, _fd->ptr.blkbuf);
 
-	FS_EXT2_INODE_SET_SIZE(_fd->inode, FS_EXT2_INODE_GET_SIZE(_fd->inode) + count);
-	fs_ext2_write_inode(fs->drive, &gdat->sb, &gdat->bt, _fd->inode_num, &_fd->inode);
+	FS_EXT2_INODE_SET_SIZE(*_fd->inode, FS_EXT2_INODE_GET_SIZE(*_fd->inode) + count);
+	fs_ext2_write_inode(fs->drive, &gdat->sb, &gdat->bt, _fd->inode_num, _fd->inode);
 	return count;
 }
 
