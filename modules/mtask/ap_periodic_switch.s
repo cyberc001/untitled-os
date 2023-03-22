@@ -110,6 +110,7 @@ ap_periodic_switch:
 	mov rax, dr7
 	mov [rbx+216], rax
 	fxsave [rbx+224]
+	sub rsp, 56
 	.end_ctx_save:
 
 	mov rax, _ts_scheduler_advance_thread_queue

@@ -30,6 +30,7 @@ struct node {
 typedef struct {
 	node* root;
 	uint64_t thread_cnt;
+	uint64_t time_slice; // length of a time slice in milliseconds
 	uint8_t cpu_num;
 } thread_tree;
 thread_tree* cpu_trees;
@@ -53,6 +54,7 @@ int scheduler_init()
 	for(uint8_t i = 0; i < core_num; ++i){
 		thread_tree* t = cpu_trees + i;
 		t->thread_cnt = 0;
+		t->time_slice = 0;
 		t->root = NULL;
 		t->cpu_num = i;
 		cpu_tree_heap[i] = t;
@@ -380,6 +382,10 @@ static void endless_loop() { while(1) ; } // this loop is executed until 1st thr
 static void thread_tree_add(thread_tree* tree, thread* th)
 {
 	++tree->thread_cnt;
+	tree->time_slice = scheduler_latency / tree->thread_cnt;
+	if(tree->time_slice < min_granularity)
+		tree->time_slice = min_granularity;
+	tree->time_slice *= 1000000;
 	node* n = kmalloc(sizeof(node));
 	n->thr = th;
 	thread_tree_insert(tree, n);
@@ -419,10 +425,16 @@ thread* scheduler_advance_thread_queue()
 		time_passed = (uint64_t)-1 - prev_val + timer_val;
 	else
 		time_passed = timer_val - prev_val;
+
+	thread_tree* tree = &cpu_trees[lapic_id];
+
+	if(time_passed < tree->time_slice){
+		scheduler_prev_threads[lapic_id] = NULL;
+		return NULL;
+	}
 	timer_prev_val[lapic_id] = timer_val;
 
 	// Find thread with minimum vruntime
-	thread_tree* tree = &cpu_trees[lapic_id];
 	node* root = tree->root;
 	if(!root) return NULL;
 	while(root->child[TREE_DIR_LEFT])

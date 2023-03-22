@@ -12,7 +12,7 @@
 
 // TODO make these parameters be read from a config file
 #define scheduler_latency 48
-#define min_granularity 6
+#define min_granularity MTASK_SWITCH_TIMER_TIME
 #define default_weight 1024
 
 /* Initializes the scheduler.
