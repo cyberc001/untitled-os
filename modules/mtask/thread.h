@@ -23,6 +23,10 @@ typedef struct{
 	uint64_t vruntime;
 	uint64_t weight;
 	process* parent_proc;
+
+	/* bunch of shit necessary only for dequeing */
+	void* tree; // rbtree that contains the node
+	void* hndl; // i.e. node* in rbtree that contains the thread
 } thread;
 
 #define MTASK_SAVE_CONTEXT(thread_pt)\

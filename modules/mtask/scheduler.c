@@ -388,7 +388,20 @@ static void thread_tree_add(thread_tree* tree, thread* th)
 	tree->time_slice *= 1000000;
 	node* n = kmalloc(sizeof(node));
 	n->thr = th;
+	th->hndl = n; th->tree = tree;
 	thread_tree_insert(tree, n);
+}
+static void thread_tree_remove(thread* th)
+{
+	thread_tree* tree = th->tree;
+	--tree->thread_cnt;
+	tree->time_slice = tree->thread_cnt ? scheduler_latency / tree->thread_cnt : 0;
+	if(tree->time_slice < min_granularity)
+		tree->time_slice = min_granularity;
+	tree->time_slice *= 1000000;
+
+	node* n = thread_tree_delete(tree, th->hndl);
+	kfree(n);
 }
 
 void scheduler_queue_thread(thread* th)
@@ -409,6 +422,11 @@ void scheduler_queue_thread(thread* th)
 	uint8_t core_i = cpu_tree_heap[0]->cpu_num;
 	if(!(core_info[core_i].flags & MTASK_CORE_FLAG_BSP) && !core_info[core_i].jmp_loc)
 		ap_jump(core_i, endless_loop);
+}
+void scheduler_dequeue_thread(thread* th)
+{
+	thread_tree_remove(th);
+	cpu_tree_heap_update_smallest();
 }
 
 /* called in ap_periodic_switch.s */

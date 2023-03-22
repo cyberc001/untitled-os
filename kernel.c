@@ -103,37 +103,37 @@ void _start(struct stivale2_struct* stivale2_struct)
 
 void boot_log_write_stub(const char* str, size_t s){}
 
-volatile int ap_test_counter = 0;
+volatile int dummy_counter;
 void ap_test()
 {
 	for(;;){
-		//uart_printf("Scheduling test 0- [%d]\r\n", ap_test_counter);
-		--ap_test_counter;
-		pit_sleep_ms(100);
+		uart_printf("ap_test 0\r\n");
+		for(int i = 0; i < 1000000; ++i)
+			++dummy_counter;
 	}
 }
 void ap_test1()
 {
 	for(;;){
-		//uart_printf("Scheduling test 1+ [%d]\r\n", ap_test_counter);
-		++ap_test_counter;
-		pit_sleep_ms(100);
+		uart_printf("ap_test 1\r\n");
+		for(int i = 0; i < 1000000; ++i)
+			++dummy_counter;
 	}
 }
 void ap_test2()
 {
 	for(;;){
-		//uart_printf("Scheduling test 2- [%d]\r\n", ap_test_counter);
-		--ap_test_counter;
-		pit_sleep_ms(100);
+		uart_printf("ap_test 2\r\n");
+		for(int i = 0; i < 1000000; ++i)
+			++dummy_counter;
 	}
 }
 void ap_test3()
 {
 	for(;;){
-		//uart_printf("Scheduling test 3+ [%d]\r\n", ap_test_counter);
-		++ap_test_counter;
-		pit_sleep_ms(100);
+		uart_printf("ap_test 3\r\n");
+		for(int i = 0; i < 1000000; ++i)
+			++dummy_counter;
 	}
 }
 
@@ -324,6 +324,7 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	//void(*mtask_save_context)() = elf_get_function_module(&module_mtask, "save_context");
 	thread*(*mtask_process_add_thread)(process*, thread*) = elf_get_function_module(&module_mtask, "process_add_thread");
 	void(*mtask_scheduler_queue_thread)(thread*) = elf_get_function_module(&module_mtask, "scheduler_queue_thread");
+	void(*mtask_scheduler_dequeue_thread)(thread*) = elf_get_function_module(&module_mtask, "scheduler_dequeue_thread");
 
 	uart_printf("MTASK base: %p\r\n", module_mtask.elf_data);
 	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Initializing multitasking module");
@@ -336,10 +337,12 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	else
 		boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Initializing multitasking module");
 
+	thread** threads = kmalloc(sizeof(void*) * 8);
 	for(size_t i = 0; i < 8; ++i)
 	{ // schedule test code
 		process pr; mtask_create_process(&pr);
 		thread* th_pt = kmalloc_align(sizeof(thread), 16);
+		threads[i] = th_pt;
 		MTASK_SAVE_CONTEXT(th_pt);
 		switch(i % 4){
 			case 0: th_pt->state.rip = (uintptr_t)(ap_test); break;
@@ -354,6 +357,9 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 		mtask_scheduler_queue_thread(th_pt);
 		//kfree(th_pt);
 	}
+	mtask_scheduler_dequeue_thread(threads[0]);
+	mtask_scheduler_dequeue_thread(threads[4]);
+
 	void(*toggle_sts)(int) = elf_get_function_module(&module_mtask, "toggle_sts");
 	toggle_sts(1);
 }
