@@ -427,14 +427,12 @@ thread* scheduler_advance_thread_queue()
 	if(!root) return NULL;
 	while(root->child[TREE_DIR_LEFT])
 		root = root->child[TREE_DIR_LEFT];
-	uart_printf("[%u] minimum: %lu %p\r\n", lapic_id, root->thr->vruntime, root->thr);
 	// Incement it's runtime and re-insert it in the tree
-	root->thr->vruntime += time_passed * timer_res_ns;
+	root->thr->vruntime += time_passed * timer_res_ns * default_weight / root->thr->weight;
 	node root_cpy = *root;
 	node* root_addr = thread_tree_delete(tree, root);
 	*root_addr = root_cpy;
 	thread_tree_insert(tree, root_addr);
-	thread_tree_print(tree);
 
 	scheduler_prev_threads[lapic_id] = root_addr->thr;
 	return root_addr->thr;
