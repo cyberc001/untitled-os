@@ -41,7 +41,6 @@ int mtask_init()
 {
 	size_t hpet_timer_blocks_cnt;
 	hpet_desc_table** hpet_timer_blocks = hpet_get_timer_blocks(&hpet_timer_blocks_cnt);
-	uart_printf("COUNTER_CLK_PERIOD: %lu fs\r\n", HPET_COUNTER_CLK_PERIOD(HPET_READ_REG(hpet_timer_blocks[0]->base_addr.addr, HPET_GENREG_CAP_ID)));
 	HPET_SET_ENABLE_CNF(HPET_PTR_REG(hpet_timer_blocks[0]->base_addr.addr, HPET_GENREG_CONF)); // enable timer 0
 
 	rsdp* _rsdp = find_rsdp(get_mem_unit_size());

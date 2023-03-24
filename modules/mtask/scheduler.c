@@ -8,6 +8,8 @@
 #include "cpu/x86/apic.h"
 #include "cpu/x86/hpet.h"
 
+#include "spinlock.h"
+
 #define TREE_CLR_BLACK 	0
 #define TREE_CLR_RED 	1
 
@@ -49,6 +51,16 @@ static uint64_t timer_res_ns;
 
 int scheduler_init()
 {
+	uart_printf("SPINLOCK TEST:\r\n");
+	spinlock s;
+	spinlock_init(&s);
+	spinlock_lock(&s);
+	uart_printf("LOCKED ONCE %d\r\n", s);
+	spinlock_unlock(&s);
+	spinlock_lock(&s);
+	uart_printf("LOCKED TWICE %d\r\n", s);
+	spinlock_unlock(&s);
+
 	cpu_trees = kmalloc(sizeof(thread_tree) * core_num);
 	cpu_tree_heap = kmalloc(sizeof(thread_tree*) * core_num);
 	for(uint8_t i = 0; i < core_num; ++i){
