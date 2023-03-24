@@ -406,6 +406,7 @@ static void thread_tree_remove(thread* th)
 
 void scheduler_queue_thread(thread* th)
 {
+	asm volatile("cli");
 	node* root = cpu_tree_heap[0]->root;
 	if(root){
 		while(root->child[TREE_DIR_LEFT])
@@ -422,11 +423,14 @@ void scheduler_queue_thread(thread* th)
 	uint8_t core_i = cpu_tree_heap[0]->cpu_num;
 	if(!(core_info[core_i].flags & MTASK_CORE_FLAG_BSP) && !core_info[core_i].jmp_loc)
 		ap_jump(core_i, endless_loop);
+	asm volatile("sti");
 }
 void scheduler_dequeue_thread(thread* th)
 {
+	asm volatile("cli");
 	thread_tree_remove(th);
 	cpu_tree_heap_update_smallest();
+	asm volatile("sti");
 }
 
 /* called in ap_periodic_switch.s */
