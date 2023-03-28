@@ -29,16 +29,35 @@ struct node {
 	node* parent;
 };
 
+typedef struct cpu_tree_lnode cpu_tree_lnode;
 typedef struct {
 	node* root;
 	uint64_t thread_cnt;
 	uint64_t time_slice; // length of a time slice in milliseconds
 	uint8_t cpu_num;
+	cpu_tree_lnode* list_ptr; // pointer to the list node that contains the tree, used when re-ordering the list when de-queuing a thread
 	spinlock lock;
 } thread_tree;
 thread_tree* cpu_trees;
-thread_tree** cpu_tree_heap; // organized as a binary heap with fixed size
-spinlock cpu_heap_lock;
+struct cpu_tree_lnode {
+	thread_tree* tree;
+	cpu_tree_lnode* next;
+	cpu_tree_lnode* prev;
+};
+static cpu_tree_lnode* cpu_tree_list; // oredered from cpu queue with lowest amount of jobs to highest
+spinlock cpu_tree_list_lock;
+
+static void print_cpu_tree_list()
+{
+	uart_printf("\r\n");
+	cpu_tree_lnode* cur = cpu_tree_list;
+	while(cur){
+		uart_printf("%p[%u]\tnext: %p\tprev: %p\tthread_cnt: %lu\r\n", cur, cur->tree->cpu_num, cur->next, cur->prev, cur->tree->thread_cnt);
+		cur = cur->next;
+	}
+	uart_printf("\r\n");
+	uart_printf("\r\n");
+}
 
 extern uint64_t _ts_scheduler_advance_thread_queue[1];
 extern uint64_t _ts_scheduler_prev_threads[1];
@@ -54,7 +73,7 @@ static uint64_t timer_res_ns;
 int scheduler_init()
 {
 	cpu_trees = kmalloc(sizeof(thread_tree) * core_num);
-	cpu_tree_heap = kmalloc(sizeof(thread_tree*) * core_num);
+	cpu_tree_list = NULL;
 	for(uint8_t i = 0; i < core_num; ++i){
 		thread_tree* t = cpu_trees + i;
 		t->thread_cnt = 0;
@@ -62,9 +81,17 @@ int scheduler_init()
 		t->root = NULL;
 		t->cpu_num = i;
 		spinlock_init(&t->lock);
-		cpu_tree_heap[i] = t;
+
+		cpu_tree_lnode* new_lnode = kmalloc(sizeof(cpu_tree_lnode));
+		new_lnode->tree = t;
+		new_lnode->next = cpu_tree_list;
+		new_lnode->prev = NULL;
+		if(cpu_tree_list)
+			cpu_tree_list->prev = new_lnode;
+		cpu_tree_list = new_lnode;
+		t->list_ptr = new_lnode;
 	}
-	spinlock_init(&cpu_heap_lock);
+	spinlock_init(&cpu_tree_list_lock);
 
 	*_ts_scheduler_advance_thread_queue = (uintptr_t)scheduler_advance_thread_queue;
 
@@ -93,55 +120,70 @@ void sync_timers()
 		timer_prev_val[i] = timer_val;
 }
 
-/* Thread tree binary heap functions */
-
-static void cpu_tree_heap_heapify_up()
+// Call this function if the smallest element has had it's thread count increased and should be moved to a new position.
+static void cpu_tree_list_move_smallest()
 {
-	size_t k = core_num - 1;
-	thread_tree* el = cpu_tree_heap[k];
-	for(;;){
-		thread_tree* t = cpu_tree_heap[k / 2];
-		if(t->thread_cnt < el->thread_cnt) // heap condition is not violated
-			break;
-		cpu_tree_heap[k] = t; // else drag "el" up
-		k /= 2;
-		if(k == 0)
-			break;
+	spinlock_lock(&cpu_tree_list_lock);
+	cpu_tree_lnode* next_head = cpu_tree_list->next;
+	cpu_tree_lnode* cur = cpu_tree_list->next;
+	if(cur){
+		cpu_tree_lnode* prev = cur->prev;
+		while(cur && cpu_tree_list->tree->thread_cnt > cur->tree->thread_cnt){
+			prev = cur;
+			cur = cur->next;
+		}
+		if(!cur){ // reached the end of the list, still have the biggest amount of threads
+			prev->next = cpu_tree_list;
+			cpu_tree_list->next = NULL;
+			cpu_tree_list->prev = prev;
+			cpu_tree_list = next_head;
+		}
+		else if(cur->prev != cpu_tree_list){ // if the tree was actually moved, replace head element with 2nd next lowest on threads tree
+			cur->prev->next = cpu_tree_list;
+			cpu_tree_list->next = cur;
+			cpu_tree_list->prev = cur->prev;
+			cur->prev = cpu_tree_list;
+
+			cpu_tree_list = next_head;
+			next_head->prev = NULL;
+		}
 	}
-	cpu_tree_heap[k] = el;
+	spinlock_unlock(&cpu_tree_list_lock);
 }
-static void cpu_tree_heap_heapify_down()
+// If a thread count decreased for a cpu tree, call this function to move it to the left (closer to the fewer thread count trees)
+static void cpu_tree_list_move_left(thread_tree* tree)
 {
-	thread_tree* el = cpu_tree_heap[0];
-	uint8_t tcore_num = core_num - 1;
-	size_t k = 0; while(k < tcore_num / 2){
-		size_t _min = 0; // minimum child index
-		if(k*2 + 1 < tcore_num) // if left child exists
-			_min = k*2 + 1;
-		if(k*2 + 2 < tcore_num && cpu_tree_heap[k*2 + 2]->thread_cnt < cpu_tree_heap[_min]->thread_cnt) // if right child exists and is smaller than left child
-			_min = k*2 + 2;
+	spinlock_lock(&cpu_tree_list_lock);
+	cpu_tree_lnode* cur = tree->list_ptr->prev;
 
-		thread_tree* t = cpu_tree_heap[_min];
-		if(t->thread_cnt >= el->thread_cnt) // heap condition is not violated
-			break;
-		cpu_tree_heap[k] = t; // else drag "el" down in place of minimum child element
-		k = _min;
+	if(cur){ // if the tree is not at the beginning already
+		while(cur && tree->thread_cnt < cur->tree->thread_cnt)
+			cur = cur->prev;
+		if(!cur){ // reached the beginning of the list, still have the smallest amount of threads
+			/*if(tree->list_ptr->prev) not needed, outer if checks for it already */
+			tree->list_ptr->prev->next = tree->list_ptr->next;
+			if(tree->list_ptr->next)
+				tree->list_ptr->next->prev = tree->list_ptr->prev;
+
+			tree->list_ptr->next = cpu_tree_list;
+			tree->list_ptr->prev = NULL;
+			cpu_tree_list->prev = tree->list_ptr;
+			cpu_tree_list = tree->list_ptr;
+		}
+		else if(cur->prev != cpu_tree_list){ // got stopped in the middle
+			/*if(tree->list_ptr->prev) not needed, outer if checks for it already */
+			tree->list_ptr->prev->next = tree->list_ptr->next;
+			if(tree->list_ptr->next)
+				tree->list_ptr->next->prev = tree->list_ptr->prev;
+
+			tree->list_ptr->next = cur->next;
+			tree->list_ptr->prev = cur;
+			if(cur->next)
+				cur->next->prev = tree->list_ptr;
+			cur->next = tree->list_ptr;
+		}
 	}
-	cpu_tree_heap[k] = el;
-}
-
-// Call this function if the smallest element has had it's thread count increased and should be updated.
-static void cpu_tree_heap_update_smallest()
-{
-	spinlock_lock(&cpu_heap_lock);
-	if(core_num == 1)
-		return;
-	thread_tree* smallest = cpu_tree_heap[0];
-	cpu_tree_heap[0] = cpu_tree_heap[core_num - 1];
-	cpu_tree_heap_heapify_down();
-	cpu_tree_heap[core_num - 1] = smallest;
-	cpu_tree_heap_heapify_up();
-	spinlock_unlock(&cpu_heap_lock);
+	spinlock_unlock(&cpu_tree_list_lock);
 }
 
 /* RB tree functions */
@@ -419,7 +461,7 @@ static void thread_tree_remove(thread* th)
 void scheduler_queue_thread(thread* th)
 {
 	asm volatile("cli");
-	node* root = cpu_tree_heap[0]->root;
+	node* root = cpu_tree_list->tree->root;
 	if(root){
 		while(root->child[TREE_DIR_LEFT])
 			root = root->child[TREE_DIR_LEFT];
@@ -428,11 +470,11 @@ void scheduler_queue_thread(thread* th)
 	else
 		th->vruntime = 0;
 	// Find a tree with least amount of jobs (using binary heap)
-	thread_tree_add(cpu_tree_heap[0], th);
-	cpu_tree_heap_update_smallest();
+	thread_tree_add(cpu_tree_list->tree, th);
+	cpu_tree_list_move_smallest();
 
 	// this AP jump is only needed so the core actually gets initialized and starts getting task switch interrupts
-	uint8_t core_i = cpu_tree_heap[0]->cpu_num;
+	uint8_t core_i = cpu_tree_list->tree->cpu_num;
 	if(!(core_info[core_i].flags & MTASK_CORE_FLAG_BSP) && !core_info[core_i].jmp_loc)
 		ap_jump(core_i, endless_loop);
 	asm volatile("sti");
@@ -441,7 +483,7 @@ void scheduler_dequeue_thread(thread* th)
 {
 	asm volatile("cli");
 	thread_tree_remove(th);
-	cpu_tree_heap_update_smallest();
+	cpu_tree_list_move_left(th->tree);
 	asm volatile("sti");
 }
 
