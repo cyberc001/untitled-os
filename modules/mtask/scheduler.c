@@ -34,9 +34,11 @@ typedef struct {
 	uint64_t thread_cnt;
 	uint64_t time_slice; // length of a time slice in milliseconds
 	uint8_t cpu_num;
+	spinlock lock;
 } thread_tree;
 thread_tree* cpu_trees;
 thread_tree** cpu_tree_heap; // organized as a binary heap with fixed size
+spinlock cpu_heap_lock;
 
 extern uint64_t _ts_scheduler_advance_thread_queue[1];
 extern uint64_t _ts_scheduler_prev_threads[1];
@@ -51,16 +53,6 @@ static uint64_t timer_res_ns;
 
 int scheduler_init()
 {
-	uart_printf("SPINLOCK TEST:\r\n");
-	spinlock s;
-	spinlock_init(&s);
-	spinlock_lock(&s);
-	uart_printf("LOCKED ONCE %d\r\n", s);
-	spinlock_unlock(&s);
-	spinlock_lock(&s);
-	uart_printf("LOCKED TWICE %d\r\n", s);
-	spinlock_unlock(&s);
-
 	cpu_trees = kmalloc(sizeof(thread_tree) * core_num);
 	cpu_tree_heap = kmalloc(sizeof(thread_tree*) * core_num);
 	for(uint8_t i = 0; i < core_num; ++i){
@@ -69,8 +61,10 @@ int scheduler_init()
 		t->time_slice = 0;
 		t->root = NULL;
 		t->cpu_num = i;
+		spinlock_init(&t->lock);
 		cpu_tree_heap[i] = t;
 	}
+	spinlock_init(&cpu_heap_lock);
 
 	*_ts_scheduler_advance_thread_queue = (uintptr_t)scheduler_advance_thread_queue;
 
@@ -139,6 +133,7 @@ static void cpu_tree_heap_heapify_down()
 // Call this function if the smallest element has had it's thread count increased and should be updated.
 static void cpu_tree_heap_update_smallest()
 {
+	spinlock_lock(&cpu_heap_lock);
 	if(core_num == 1)
 		return;
 	thread_tree* smallest = cpu_tree_heap[0];
@@ -146,6 +141,7 @@ static void cpu_tree_heap_update_smallest()
 	cpu_tree_heap_heapify_down();
 	cpu_tree_heap[core_num - 1] = smallest;
 	cpu_tree_heap_heapify_up();
+	spinlock_unlock(&cpu_heap_lock);
 }
 
 /* RB tree functions */
@@ -221,6 +217,7 @@ static void thread_tree_insertp(thread_tree* tree, node* n, node* p, int dir)
 
 static void thread_tree_insert(thread_tree* tree, node* n)
 {
+	spinlock_lock(&tree->lock);
 	node* root = tree->root;
 	if(!root){
 		n->clr = TREE_CLR_BLACK;
@@ -241,6 +238,7 @@ static void thread_tree_insert(thread_tree* tree, node* n)
 		}
 		root = root->child[dir];
 	}
+	spinlock_unlock(&tree->lock);
 }
 
 static node* thread_tree_delete_replacement(node* n)
@@ -322,6 +320,7 @@ static void thread_tree_delete_fixbb(thread_tree* tree, node* n) // fix 2 black 
 
 static node* thread_tree_delete(thread_tree* tree, node* n)
 {
+	spinlock_lock(&tree->lock);
 	while(n)
 	{
 		node* u = thread_tree_delete_replacement(n);
@@ -371,6 +370,7 @@ static node* thread_tree_delete(thread_tree* tree, node* n)
 		u->thr = tmp.thr;
 		n = u;
 	}
+	spinlock_unlock(&tree->lock);
 	return NULL;
 }
 
