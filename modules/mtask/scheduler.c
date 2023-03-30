@@ -259,7 +259,6 @@ static void thread_tree_insertp(thread_tree* tree, node* n, node* p, int dir)
 
 static void thread_tree_insert(thread_tree* tree, node* n)
 {
-	spinlock_lock(&tree->lock);
 	node* root = tree->root;
 	if(!root){
 		n->clr = TREE_CLR_BLACK;
@@ -280,7 +279,6 @@ static void thread_tree_insert(thread_tree* tree, node* n)
 		}
 		root = root->child[dir];
 	}
-	spinlock_unlock(&tree->lock);
 }
 
 static node* thread_tree_delete_replacement(node* n)
@@ -362,7 +360,6 @@ static void thread_tree_delete_fixbb(thread_tree* tree, node* n) // fix 2 black 
 
 static node* thread_tree_delete(thread_tree* tree, node* n)
 {
-	spinlock_lock(&tree->lock);
 	while(n)
 	{
 		node* u = thread_tree_delete_replacement(n);
@@ -412,7 +409,6 @@ static node* thread_tree_delete(thread_tree* tree, node* n)
 		u->thr = tmp.thr;
 		n = u;
 	}
-	spinlock_unlock(&tree->lock);
 	return NULL;
 }
 
@@ -461,7 +457,9 @@ static void thread_tree_remove(thread* th)
 void scheduler_queue_thread(thread* th)
 {
 	asm volatile("cli");
-	node* root = cpu_tree_list->tree->root;
+	thread_tree* tree = cpu_tree_list->tree;
+	spinlock_lock(&tree->lock);
+	node* root = tree->root;
 	if(root){
 		while(root->child[TREE_DIR_LEFT])
 			root = root->child[TREE_DIR_LEFT];
@@ -470,11 +468,12 @@ void scheduler_queue_thread(thread* th)
 	else
 		th->vruntime = 0;
 	// Find a tree with least amount of jobs (using binary heap)
-	thread_tree_add(cpu_tree_list->tree, th);
+	thread_tree_add(tree, th);
+	uint8_t core_i = tree->cpu_num;
+	spinlock_unlock(&tree->lock);
 	cpu_tree_list_move_smallest();
 
 	// this AP jump is only needed so the core actually gets initialized and starts getting task switch interrupts
-	uint8_t core_i = cpu_tree_list->tree->cpu_num;
 	if(!(core_info[core_i].flags & MTASK_CORE_FLAG_BSP) && !core_info[core_i].jmp_loc)
 		ap_jump(core_i, endless_loop);
 	asm volatile("sti");
@@ -482,7 +481,9 @@ void scheduler_queue_thread(thread* th)
 void scheduler_dequeue_thread(thread* th)
 {
 	asm volatile("cli");
+	spinlock_lock(&((thread_tree*)th->tree)->lock);
 	thread_tree_remove(th);
+	spinlock_unlock(&((thread_tree*)th->tree)->lock);
 	cpu_tree_list_move_left(th->tree);
 	asm volatile("sti");
 }
@@ -504,6 +505,7 @@ thread* scheduler_advance_thread_queue()
 
 	thread_tree* tree = &cpu_trees[lapic_id];
 
+	spinlock_lock(&tree->lock);
 	if(time_passed < tree->time_slice){
 		scheduler_prev_threads[lapic_id] = NULL;
 		return NULL;
@@ -521,6 +523,7 @@ thread* scheduler_advance_thread_queue()
 	node* root_addr = thread_tree_delete(tree, root);
 	*root_addr = root_cpy;
 	thread_tree_insert(tree, root_addr);
+	spinlock_unlock(&tree->lock);
 
 	scheduler_prev_threads[lapic_id] = root_addr->thr;
 	return root_addr->thr;
