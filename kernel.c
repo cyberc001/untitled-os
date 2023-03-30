@@ -358,7 +358,7 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 		//kfree(th_pt);
 	}
 	mtask_scheduler_dequeue_thread(threads[0]);
-	mtask_scheduler_dequeue_thread(threads[4]);
+	mtask_scheduler_dequeue_thread(threads[7]);
 
 	void(*toggle_sts)(int) = elf_get_function_module(&module_mtask, "toggle_sts");
 	toggle_sts(1);

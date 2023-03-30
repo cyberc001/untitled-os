@@ -35,6 +35,9 @@ typedef struct {
 	uint64_t thread_cnt;
 	uint64_t time_slice; // length of a time slice in milliseconds
 	uint8_t cpu_num;
+
+	uint64_t last_give_time; // nanosecond timestamp which is compared against current timer value to see if this task switch should give a job
+
 	cpu_tree_lnode* list_ptr; // pointer to the list node that contains the tree, used when re-ordering the list when de-queuing a thread
 	spinlock lock;
 } thread_tree;
@@ -45,7 +48,7 @@ struct cpu_tree_lnode {
 	cpu_tree_lnode* prev;
 };
 static cpu_tree_lnode* cpu_tree_list; // oredered from cpu queue with lowest amount of jobs to highest
-spinlock cpu_tree_list_lock;
+static spinlock cpu_tree_list_lock;
 
 static void print_cpu_tree_list()
 {
@@ -116,8 +119,13 @@ int scheduler_init()
 void sync_timers()
 {
 	uint64_t timer_val = HPET_READ_REG(timer_addr, HPET_GENREG_COUNTER);
-	for(uint8_t i = 0; i < core_num; ++i)
+	uint64_t spliced_task_give_delay = task_give_delay / core_num;
+	if(spliced_task_give_delay < scheduler_latency * 10)
+		spliced_task_give_delay = scheduler_latency * 10;
+	for(uint8_t i = 0; i < core_num; ++i){
 		timer_prev_val[i] = timer_val;
+		cpu_trees[i].last_give_time = timer_val - spliced_task_give_delay * (i + 1); // oveflow is purely intentional
+	}
 }
 
 // Call this function if the smallest element has had it's thread count increased and should be moved to a new position.
@@ -431,6 +439,15 @@ static void endless_loop() { while(1) ; } // this loop is executed until 1st thr
 
 static void thread_tree_add(thread_tree* tree, thread* th)
 {
+	uint64_t min_vruntime = 0;
+	node* root = tree->root;
+	if(root){
+		while(root->child[TREE_DIR_LEFT])
+			root = root->child[TREE_DIR_LEFT];
+		min_vruntime = root->thr->vruntime;
+	}
+	th->vruntime = min_vruntime;
+
 	++tree->thread_cnt;
 	tree->time_slice = scheduler_latency / tree->thread_cnt;
 	if(tree->time_slice < min_granularity)
@@ -454,19 +471,23 @@ static void thread_tree_remove(thread* th)
 	kfree(n);
 }
 
+static uint64_t get_min_vruntime(thread_tree* tree)
+{
+	node* root = tree->root;
+	if(root){
+		while(root->child[TREE_DIR_LEFT])
+			root = root->child[TREE_DIR_LEFT];
+		return root->thr->vruntime;
+	}
+	return 0;
+}
+
 void scheduler_queue_thread(thread* th)
 {
 	asm volatile("cli");
 	thread_tree* tree = cpu_tree_list->tree;
 	spinlock_lock(&tree->lock);
-	node* root = tree->root;
-	if(root){
-		while(root->child[TREE_DIR_LEFT])
-			root = root->child[TREE_DIR_LEFT];
-		th->vruntime = root->thr->vruntime;
-	}
-	else
-		th->vruntime = 0;
+	th->vruntime = get_min_vruntime(tree);
 	// Find a tree with least amount of jobs (using binary heap)
 	thread_tree_add(tree, th);
 	uint8_t core_i = tree->cpu_num;
@@ -476,6 +497,7 @@ void scheduler_queue_thread(thread* th)
 	// this AP jump is only needed so the core actually gets initialized and starts getting task switch interrupts
 	if(!(core_info[core_i].flags & MTASK_CORE_FLAG_BSP) && !core_info[core_i].jmp_loc)
 		ap_jump(core_i, endless_loop);
+	print_cpu_tree_list();
 	asm volatile("sti");
 }
 void scheduler_dequeue_thread(thread* th)
@@ -485,6 +507,7 @@ void scheduler_dequeue_thread(thread* th)
 	thread_tree_remove(th);
 	spinlock_unlock(&((thread_tree*)th->tree)->lock);
 	cpu_tree_list_move_left(th->tree);
+	print_cpu_tree_list();
 	asm volatile("sti");
 }
 
@@ -504,17 +527,50 @@ thread* scheduler_advance_thread_queue()
 		time_passed = timer_val - prev_val;
 
 	thread_tree* tree = &cpu_trees[lapic_id];
-
 	spinlock_lock(&tree->lock);
+
+	// Check if it's time to give tasks
+	uint64_t time_passed_after_give = tree->last_give_time;
+	if(time_passed_after_give > timer_val)
+		time_passed_after_give = (uint64_t)-1 - time_passed_after_give + timer_val;
+	else
+		time_passed_after_give = timer_val - time_passed_after_give;
+
+	if(time_passed_after_give >= task_give_delay){
+		uint64_t min_count = cpu_tree_list->tree->thread_cnt;
+		uint64_t task_count_diff = tree->thread_cnt - min_count;
+		uint64_t thres_amt = tree->thread_cnt * task_give_thres / 100;
+		if(thres_amt < task_give_thres_min)
+			thres_amt = task_give_thres_min;
+		if(task_count_diff >= thres_amt){ // time to give away some jobs
+			uint64_t give_amt = task_count_diff / 2;
+
+			uart_printf("\r\n#%u has to give %lu jobs to #%u (diff %lu)\r\n", lapic_id, give_amt, cpu_tree_list->tree->cpu_num, task_count_diff);
+			for(; give_amt != 0; --give_amt){
+				thread* th = tree->root->thr; // a bit of code duplication but this avoids double locking current CPU tree spinlock
+				thread_tree_remove(tree->root->thr);
+				cpu_tree_list_move_left(tree);
+				scheduler_queue_thread(th); // this locks minimum thread count CPU tree - actually important
+			}
+
+		}
+		tree->last_give_time = timer_val;
+	}
+
+	// Check if time slice allocated for this thread has passed
 	if(time_passed < tree->time_slice){
 		scheduler_prev_threads[lapic_id] = NULL;
+		spinlock_unlock(&tree->lock);
 		return NULL;
 	}
 	timer_prev_val[lapic_id] = timer_val;
 
 	// Find thread with minimum vruntime
 	node* root = tree->root;
-	if(!root) return NULL;
+	if(!root){
+		spinlock_unlock(&tree->lock);
+		return NULL;
+	}
 	while(root->child[TREE_DIR_LEFT])
 		root = root->child[TREE_DIR_LEFT];
 	// Incement it's runtime and re-insert it in the tree
