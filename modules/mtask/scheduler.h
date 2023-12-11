@@ -27,6 +27,7 @@ int scheduler_init();
 
 void scheduler_queue_thread(thread* th);
 void scheduler_dequeue_thread(thread* th);
+void scheduler_sleep_thread(thread* th);
 
 /* Changes current thread in the thread queue of the current core to next one.
 *  Called by AP_PERIODIC_SWITCH interrupt.

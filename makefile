@@ -133,7 +133,7 @@ modules/vmemory/allocator.o: modules/vmemory/allocator.c modules/vmemory/allocat
 	$(CC_MODULE) -c $< -o $@ -fPIC
 
 # multitasking module
-modules/mtask/mtask.so: modules/mtask/mtask.o modules/mtask/acpi.o modules/mtask/scheduler.o modules/mtask/process.o modules/mtask/smp_trampoline.o modules/mtask/ap_periodic_switch.o
+modules/mtask/mtask.so: modules/mtask/mtask.o modules/mtask/acpi.o modules/mtask/scheduler.o modules/mtask/process.o modules/mtask/thread_tree.o modules/mtask/smp_trampoline.o modules/mtask/ap_periodic_switch.o
 	$(LD) -shared -fPIC -nostdlib $^ -o $@
 	-sudo umount ../mnt
 	sudo mount -o loop atest.img ../mnt
@@ -143,9 +143,11 @@ modules/mtask/mtask.o: modules/mtask/mtask.c modules/mtask/mtask.h
 	$(CC_MODULE) -c $< -o $@ -fPIC
 modules/mtask/acpi.o: modules/mtask/acpi.c modules/mtask/acpi.h
 	$(CC_MODULE) -c $< -o $@ -fPIC
-modules/mtask/scheduler.o: modules/mtask/scheduler.c modules/mtask/scheduler.h
+modules/mtask/scheduler.o: modules/mtask/scheduler.c modules/mtask/scheduler.h modules/mtask/thread_tree.h
 	$(CC_MODULE) -c $< -o $@ -fPIC
 modules/mtask/process.o: modules/mtask/process.c modules/mtask/process.h modules/mtask/thread.h
+	$(CC_MODULE) -c $< -o $@ -fPIC
+modules/mtask/thread_tree.o: modules/mtask/thread_tree.c modules/mtask/thread_tree.h
 	$(CC_MODULE) -c $< -o $@ -fPIC
 modules/mtask/smp_trampoline.o: modules/mtask/smp_trampoline.s
 	$(NASM) -o $@ $<
