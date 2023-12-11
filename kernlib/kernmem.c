@@ -5,6 +5,7 @@
 #include "dev/uart.h"
 #include "cstdlib/string.h"
 
+#include "cpu/spinlock.h"
 #include "modules/vmemory/vmemory.h"
 
 // Basic kernel heap memory implementation.
@@ -27,11 +28,13 @@ struct kmem_node
 };
 kmem_node* kmem_head = (kmem_node*)KMEM_HEAP_BASE;
 void* occupied_to = KMEM_HEAP_BASE; // upper bound of memory currently mapped
+static spinlock kmem_spinlock;
 
 void kmem_init()
 {
 	// initializing the dummy node, which would store the 1st element of the list
 	kmem_head->next = kmem_head->prev = NULL;
+	spinlock_init(&kmem_spinlock);
 }
 void* kmem_get_heap_end()
 {
@@ -54,6 +57,7 @@ void* kmalloc(size_t size)
 }
 void* kmalloc_align(size_t size, size_t align)
 {
+	spinlock_lock(&kmem_spinlock);
 	kmem_node* it = kmem_head;
 	while(it->next){
 		// calculate the gap between current and next memory node
@@ -100,6 +104,7 @@ void* kmalloc_align(size_t size, size_t align)
 	it->next->sz = size;
 	it->next->next = NULL;
 	it->next->prev = it;
+	spinlock_unlock(&kmem_spinlock);
 	return it->next + 1;
 }
 
@@ -112,6 +117,7 @@ void* krealloc_align(void* ptr, size_t size, size_t align)
 	if(!ptr)
 		return kmalloc_align(size, align);
 
+	spinlock_lock(&kmem_spinlock);
 	kmem_node* kn = ptr; kn--;
 
 	if(kn->next){ // if it's not the last element on the list, try to resize in the gap first
@@ -130,15 +136,18 @@ void* krealloc_align(void* ptr, size_t size, size_t align)
 
 	memcpy(nptr, ptr, kn->sz);
 	kfree(ptr);
+	spinlock_unlock(&kmem_spinlock);
 	return nptr;
 }
 
 void kfree(void* ptr)
 {
 	// just unlink the node with previous and next ones, if they exist
+	spinlock_lock(&kmem_spinlock);
 	kmem_node* it = (kmem_node*)ptr - 1;
 	if(it->prev)
 		it->prev->next = it->next;
 	if(it->next)
 		it->next->prev = it->prev;
+	spinlock_unlock(&kmem_spinlock);
 }

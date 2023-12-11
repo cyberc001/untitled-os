@@ -1,10 +1,10 @@
 #include "thread_tree.h"
 
-static node* thread_tree_rotate(thread_tree* tree, node* p, int dir)
+static thread_tree_node* thread_tree_rotate(thread_tree* tree, thread_tree_node* p, int dir)
 {
-	node* g = p->parent;
-	node* s = p->child[1 - dir];
-	node* c = s ? s->child[dir] : NULL;
+	thread_tree_node* g = p->parent;
+	thread_tree_node* s = p->child[1 - dir];
+	thread_tree_node* c = s ? s->child[dir] : NULL;
 
 	p->child[1 - dir] = c;
 	if(c) c->parent = p;
@@ -19,10 +19,10 @@ static node* thread_tree_rotate(thread_tree* tree, node* p, int dir)
 	return s;
 }
 
-static void thread_tree_insertp(thread_tree* tree, node* n, node* p, int dir)
+static void thread_tree_insertp(thread_tree* tree, thread_tree_node* n, thread_tree_node* p, int dir)
 {
-	node	*g,		// grandparent
-			*u;		// uncle
+	thread_tree_node *g,		// grandparent
+			 *u;		// uncle
 
 	n->clr = TREE_CLR_RED;
 	n->child[TREE_DIR_LEFT] = n->child[TREE_DIR_RIGHT] = NULL;
@@ -69,9 +69,9 @@ static void thread_tree_insertp(thread_tree* tree, node* n, node* p, int dir)
 	} while((p = n->parent));
 }
 
-void thread_tree_insert(thread_tree* tree, node* n)
+void thread_tree_insert(thread_tree* tree, thread_tree_node* n)
 {
-	node* root = tree->root;
+	thread_tree_node* root = tree->root;
 	if(!root){
 		n->clr = TREE_CLR_BLACK;
 		n->child[TREE_DIR_LEFT] = n->child[TREE_DIR_RIGHT] = NULL;
@@ -93,7 +93,7 @@ void thread_tree_insert(thread_tree* tree, node* n)
 	}
 }
 
-static node* thread_tree_delete_replacement(node* n)
+static thread_tree_node* thread_tree_delete_replacement(thread_tree_node* n)
 {
 	if(n->child[TREE_DIR_LEFT] && n->child[TREE_DIR_RIGHT]){
 		while(n->child[TREE_DIR_LEFT])
@@ -105,12 +105,12 @@ static node* thread_tree_delete_replacement(node* n)
 	else
 		return n->child[TREE_DIR_LEFT] ? n->child[TREE_DIR_LEFT] : n->child[TREE_DIR_RIGHT];
 }
-static void thread_tree_delete_fixbb(thread_tree* tree, node* n) // fix 2 black nodes in a row
+static void thread_tree_delete_fixbb(thread_tree* tree, thread_tree_node* n) // fix 2 black nodes in a row
 {
 	if(n == tree->root)
 		return;
 
-	node *s = TREE_GET_SIBLING(n), *p = n->parent;
+	thread_tree_node *s = TREE_GET_SIBLING(n), *p = n->parent;
 	if(!s){
 		// no sibling - proceed up the tree
 		thread_tree_delete_fixbb(tree, p);
@@ -170,14 +170,14 @@ static void thread_tree_delete_fixbb(thread_tree* tree, node* n) // fix 2 black 
 	}
 }
 
-node* thread_tree_delete(thread_tree* tree, node* n)
+thread_tree_node* thread_tree_delete(thread_tree* tree, thread_tree_node* n)
 {
 	while(n)
 	{
-		node* u = thread_tree_delete_replacement(n);
+		thread_tree_node* u = thread_tree_delete_replacement(n);
 		int un_is_black = (!u || u->clr == TREE_CLR_BLACK) && n->clr == TREE_CLR_BLACK;
 
-		node* p = n->parent;
+		thread_tree_node* p = n->parent;
 
 		if(!u){
 			if(n == tree->root)
@@ -198,8 +198,9 @@ node* thread_tree_delete(thread_tree* tree, node* n)
 		if(!n->child[TREE_DIR_LEFT] || !n->child[TREE_DIR_RIGHT]){
 			// n has only 1 child
 			if(n == tree->root)
-			{ // replace n with it's child if n == root
+			{ // replace n with it's child if n == root	
 				n->thr = u->thr;
+				n->thr->hndl = n;
 				n->child[TREE_DIR_LEFT] = n->child[TREE_DIR_RIGHT] = NULL;
 				return u;
 			}
@@ -215,23 +216,25 @@ node* thread_tree_delete(thread_tree* tree, node* n)
 			}
 		}
 		// swap u and n
-		node tmp;
+		thread_tree_node tmp;
 		tmp.thr = n->thr;
 		n->thr = u->thr;
 		u->thr = tmp.thr;
+		n->thr->hndl = n;
+		u->thr->hndl = u;
 		n = u;
 	}
 	return NULL;
 }
 
-void thread_tree_print_r(node* n, unsigned depth)
+void thread_tree_print_r(thread_tree_node* n, unsigned depth)
 {
 	for(unsigned i = 0; i < depth; ++i) uart_putchar('\t');
 	if(!n){
 		uart_printf("--\r\n"); // it's a leaf
 		return;
 	}
-	uart_printf("%c w %lu vr %lu\r\n", n->clr == TREE_CLR_BLACK ? 'B' : 'R', n->thr->weight, n->thr->vruntime);
+	uart_printf("%c w %lu vr %lu addr %p (thr %p)\r\n", n->clr == TREE_CLR_BLACK ? 'B' : 'R', n->thr->weight, n->thr->vruntime, n, n->thr);
 
 	thread_tree_print_r(n->child[TREE_DIR_LEFT], depth + 1);
 	thread_tree_print_r(n->child[TREE_DIR_RIGHT], depth + 1);

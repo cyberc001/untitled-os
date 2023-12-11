@@ -1,7 +1,8 @@
 #include "scheduler.h"
 #include "thread_tree.h"
-#include "spinlock.h"
+#include "thread_pqueue.h"
 
+#include "cpu/spinlock.h"
 #include "mtask.h"
 #include "string.h"
 #include "kernlib/kernmem.h"
@@ -17,6 +18,8 @@ struct cpu_tree_lnode {
 };
 static cpu_tree_lnode* cpu_tree_list; // oredered from cpu queue with lowest amount of jobs to highest
 static spinlock cpu_tree_list_lock;
+
+static thread_pqueue* cpu_sleep_pqueue_list;
 
 static void print_cpu_tree_list()
 {
@@ -42,6 +45,8 @@ static uint64_t timer_res_ns;
 int scheduler_init()
 {
 	cpu_trees = kmalloc(sizeof(thread_tree) * core_num);
+	cpu_sleep_pqueue_list = kmalloc(sizeof(thread_pqueue) * core_num);
+
 	cpu_tree_list = NULL;
 	for(uint8_t i = 0; i < core_num; ++i){
 		thread_tree* t = cpu_trees + i;
@@ -59,6 +64,8 @@ int scheduler_init()
 			cpu_tree_list->prev = new_lnode;
 		cpu_tree_list = new_lnode;
 		t->list_ptr = new_lnode;
+
+		thread_pqueue_init(&cpu_sleep_pqueue_list[i]);
 	}
 	spinlock_init(&cpu_tree_list_lock);
 
@@ -97,6 +104,7 @@ void sync_timers()
 // Call this function if the smallest element has had it's thread count increased and should be moved to a new position.
 static void cpu_tree_list_move_smallest()
 {
+	uart_printf("MOVE %p %p\r\n", ((thread**)0x206ed8)[0], ((thread**)0x206ed8)[1]);
 	spinlock_lock(&cpu_tree_list_lock);
 	cpu_tree_lnode* next_head = cpu_tree_list->next;
 	cpu_tree_lnode* cur = cpu_tree_list->next;
@@ -167,7 +175,7 @@ static void endless_loop() { while(1) ; } // this loop is executed until 1st thr
 static void thread_tree_add(thread_tree* tree, thread* th)
 {
 	uint64_t min_vruntime = 0;
-	node* root = tree->root;
+	thread_tree_node* root = tree->root;
 	if(root){
 		while(root->child[TREE_DIR_LEFT])
 			root = root->child[TREE_DIR_LEFT];
@@ -179,8 +187,9 @@ static void thread_tree_add(thread_tree* tree, thread* th)
 	tree->time_slice = scheduler_latency / tree->thread_cnt;
 	if(tree->time_slice < min_granularity)
 		tree->time_slice = min_granularity;
+
 	tree->time_slice *= 1000000;
-	node* n = kmalloc(sizeof(node));
+	thread_tree_node* n = kmalloc(sizeof(thread_tree_node));
 	n->thr = th;
 	th->hndl = n; th->tree = tree;
 	thread_tree_insert(tree, n);
@@ -194,13 +203,13 @@ static void thread_tree_remove(thread* th)
 		tree->time_slice = min_granularity;
 	tree->time_slice *= 1000000;
 
-	node* n = thread_tree_delete(tree, th->hndl);
+	thread_tree_node* n = thread_tree_delete(tree, th->hndl);
 	kfree(n);
 }
 
 static uint64_t get_min_vruntime(thread_tree* tree)
 {
-	node* root = tree->root;
+	thread_tree_node* root = tree->root;
 	if(root){
 		while(root->child[TREE_DIR_LEFT])
 			root = root->child[TREE_DIR_LEFT];
@@ -216,13 +225,16 @@ void scheduler_queue_thread(thread* th)
 	th->vruntime = get_min_vruntime(tree);
 	// Find a tree with least amount of jobs (using binary heap)
 	thread_tree_add(tree, th);
-	uint8_t core_i = tree->cpu_num;
 	spinlock_unlock(&tree->lock);
+
 	cpu_tree_list_move_smallest();
 
 	// this AP jump is only needed so the core actually gets initialized and starts getting task switch interrupts
+	uint8_t core_i = tree->cpu_num;
 	if(!(core_info[core_i].flags & MTASK_CORE_FLAG_BSP) && !core_info[core_i].jmp_loc)
 		ap_jump(core_i, endless_loop);
+
+	uart_printf("%p thread queue:\r\n", th);
 	print_cpu_tree_list();
 }
 void scheduler_dequeue_thread(thread* th)
@@ -231,11 +243,28 @@ void scheduler_dequeue_thread(thread* th)
 	thread_tree_remove(th);
 	spinlock_unlock(&((thread_tree*)th->tree)->lock);
 	cpu_tree_list_move_left(th->tree);
+
+	uart_printf("%p thread dequeue:\r\n", th);
 	print_cpu_tree_list();
 }
-void scheduler_sleep_thread(thread* th)
+void scheduler_sleep_thread(thread* th, uint64_t time_ns)
 {
+	uart_printf("%p thread sleep for %lu ns:\r\n", th, time_ns);
+	time_ns /= timer_res_ns; // convert to timer ticks
 
+	th->flags |= THREAD_FLAG_SLEEPING;
+
+	uint64_t timer_val = HPET_READ_REG(timer_addr, HPET_GENREG_COUNTER);
+	th->sleep_overflow = (uint64_t)-1 - time_ns < timer_val;
+	th->sleep_until = timer_val + time_ns;
+
+	scheduler_dequeue_thread(th);
+	thread_pqueue* q = &cpu_sleep_pqueue_list[((thread_tree*)th->tree)->cpu_num];
+	spinlock_lock(&q->lock);
+	thread_pqueue_push(q, th);
+	spinlock_unlock(&q->lock);
+
+	uart_printf("size %lu top %p\r\n", q->size, q->heap[0]);
 }
 
 /* called in ap_periodic_switch.s */
@@ -248,14 +277,26 @@ thread* scheduler_advance_thread_queue()
 	uint64_t timer_val = HPET_READ_REG(timer_addr, HPET_GENREG_COUNTER);
 	uint64_t prev_val = timer_prev_val[lapic_id];
 	uint64_t time_passed;
-	if(prev_val > timer_val)
+	thread_pqueue* sleep_queue = &cpu_sleep_pqueue_list[lapic_id];
+	if(prev_val > timer_val){
 		time_passed = (uint64_t)-1 - prev_val + timer_val;
+		thread_pqueue_reset_overflow(sleep_queue);
+	}
 	else
 		time_passed = timer_val - prev_val;
 
+	// Check on the earliest-to-wake-up sleeping threads
+	while(sleep_queue->size){
+		thread* th = sleep_queue->heap[0];
+		if(!thread_should_wakeup_now(*th, timer_val))
+			break;
+		uart_printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!waked up thread %p\r\n", th);
+		thread_pqueue_pop(sleep_queue);
+		scheduler_queue_thread(th);
+	}
+
 	thread_tree* tree = &cpu_trees[lapic_id];
 	spinlock_lock(&tree->lock);
-
 	// Check if it's time to give tasks
 	uint64_t time_passed_after_give = tree->last_give_time;
 	if(time_passed_after_give > timer_val)
@@ -293,7 +334,7 @@ thread* scheduler_advance_thread_queue()
 	timer_prev_val[lapic_id] = timer_val;
 
 	// Find thread with minimum vruntime
-	node* root = tree->root;
+	thread_tree_node* root = tree->root;
 	if(!root){
 		spinlock_unlock(&tree->lock);
 		return NULL;
@@ -302,8 +343,8 @@ thread* scheduler_advance_thread_queue()
 		root = root->child[TREE_DIR_LEFT];
 	// Incement it's runtime and re-insert it in the tree
 	root->thr->vruntime += time_passed * timer_res_ns * default_weight / root->thr->weight;
-	node root_cpy = *root;
-	node* root_addr = thread_tree_delete(tree, root);
+	thread_tree_node root_cpy = *root;
+	thread_tree_node* root_addr = thread_tree_delete(tree, root);
 	*root_addr = root_cpy;
 	thread_tree_insert(tree, root_addr);
 	spinlock_unlock(&tree->lock);

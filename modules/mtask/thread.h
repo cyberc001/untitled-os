@@ -1,15 +1,20 @@
 #ifndef THREAD_H
 #define THREAD_H
 
-/* Thread API.
-*/
-
 #include <stdint.h>
+
+/* Thread API */
+
+#define THREAD_FLAG_SLEEPING		0x1
+
+#define thread_wakeup_is_later(t1, t2) ( (t1).sleep_overflow == (t2).sleep_overflow ? ((t1).sleep_until > (t2).sleep_until) : (t1).sleep_overflow > (t2).sleep_overflow )
+#define thread_wakeup_is_earlier(t1, t2) (!thread_wakeup_is_later(t1, t2))
+#define thread_should_wakeup_now(t, timer_val) (!(t).sleep_overflow && (t).sleep_until <= (timer_val))
 
 typedef struct process process;
 
-typedef struct{
-	__attribute__ ((packed)) __attribute__ ((aligned(16))) struct{
+typedef struct {
+	__attribute__ ((packed)) __attribute__ ((aligned(16))) struct {
 		uint64_t rax, rbx, rcx, rdx, rsi, rdi;
 		uint64_t rsp, rbp;
 		uint64_t r8, r9, r10, r11, r12, r13, r14, r15;
@@ -20,13 +25,19 @@ typedef struct{
 		__attribute__ ((aligned(16))) unsigned char fx[512]; // memory for FXSAVE/FXRSTOR instructions
 	} state;
 
+	int flags;
+
 	uint64_t vruntime;
 	uint64_t weight;
+
+	uint64_t sleep_until; // valid only if (flags & THREAD_FLAG_SLEEPING)
+	int sleep_overflow; // 1 if current hpet timer value + sleep duration >= sizeof(uint64_t), set to 0 when hpet timer itself overflows
+
 	process* parent_proc;
 
 	/* bunch of shit necessary only for dequeing */
 	void* tree; // rbtree that contains the node
-	void* hndl; // i.e. node* in rbtree that contains the thread
+	void* hndl; // node in rbtree that contains the thread
 } thread;
 
 #define MTASK_SAVE_CONTEXT(thread_pt)\

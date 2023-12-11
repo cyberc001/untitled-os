@@ -325,6 +325,7 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	thread*(*mtask_process_add_thread)(process*, thread*) = elf_get_function_module(&module_mtask, "process_add_thread");
 	void(*mtask_scheduler_queue_thread)(thread*) = elf_get_function_module(&module_mtask, "scheduler_queue_thread");
 	void(*mtask_scheduler_dequeue_thread)(thread*) = elf_get_function_module(&module_mtask, "scheduler_dequeue_thread");
+	void(*mtask_scheduler_sleep_thread)(thread*, uint64_t) = elf_get_function_module(&module_mtask, "scheduler_sleep_thread");
 
 	uart_printf("MTASK base: %p\r\n", module_mtask.elf_data);
 	boot_log_printf_status(BOOT_LOG_STATUS_RUNNING, "Initializing multitasking module");
@@ -342,6 +343,7 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	{ // schedule test code
 		process pr; mtask_create_process(&pr);
 		thread* th_pt = kmalloc_align(sizeof(thread), 16);
+		memset(th_pt, 0, sizeof(thread));
 		threads[i] = th_pt;
 		MTASK_SAVE_CONTEXT(th_pt);
 		switch(i % 4){
@@ -357,8 +359,8 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 		mtask_scheduler_queue_thread(th_pt);
 		//kfree(th_pt);
 	}
-	mtask_scheduler_dequeue_thread(threads[0]);
-	mtask_scheduler_dequeue_thread(threads[7]);
+	mtask_scheduler_sleep_thread(threads[0], 1000000000);
+	mtask_scheduler_sleep_thread(threads[7], 2000000000);
 
 	void(*toggle_sts)(int) = elf_get_function_module(&module_mtask, "toggle_sts");
 	toggle_sts(1);
