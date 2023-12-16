@@ -96,14 +96,14 @@ void thread_tree_insert(thread_tree* tree, thread_tree_node* n)
 static thread_tree_node* thread_tree_delete_replacement(thread_tree_node* n)
 {
 	if(n->child[TREE_DIR_LEFT] && n->child[TREE_DIR_RIGHT]){
+		n = n->child[TREE_DIR_RIGHT];
 		while(n->child[TREE_DIR_LEFT])
 			n = n->child[TREE_DIR_LEFT];
 		return n;
 	}
-	else if(!n->child[TREE_DIR_LEFT] && !n->child[TREE_DIR_RIGHT])
+	if(!n->child[TREE_DIR_LEFT] && !n->child[TREE_DIR_RIGHT])
 		return NULL;
-	else
-		return n->child[TREE_DIR_LEFT] ? n->child[TREE_DIR_LEFT] : n->child[TREE_DIR_RIGHT];
+	return n->child[TREE_DIR_LEFT] ? n->child[TREE_DIR_LEFT] : n->child[TREE_DIR_RIGHT];
 }
 static void thread_tree_delete_fixbb(thread_tree* tree, thread_tree_node* n) // fix 2 black nodes in a row
 {
@@ -172,6 +172,9 @@ static void thread_tree_delete_fixbb(thread_tree* tree, thread_tree_node* n) // 
 
 thread_tree_node* thread_tree_delete(thread_tree* tree, thread_tree_node* n)
 {
+	//uart_printf("BEFORE:\r\n");
+	//thread_tree_print(tree);
+
 	while(n)
 	{
 		thread_tree_node* u = thread_tree_delete_replacement(n);
@@ -179,11 +182,11 @@ thread_tree_node* thread_tree_delete(thread_tree* tree, thread_tree_node* n)
 
 		thread_tree_node* p = n->parent;
 
-		if(!u){
+		if(!u){ // n is a leaf	
 			if(n == tree->root)
 				tree->root = NULL;
 			else{
-				if(un_is_black)
+				if(un_is_black) // n and u are black, n is a leaf
 					thread_tree_delete_fixbb(tree, n);
 				else
 					if(TREE_GET_SIBLING(n))
@@ -198,10 +201,12 @@ thread_tree_node* thread_tree_delete(thread_tree* tree, thread_tree_node* n)
 		if(!n->child[TREE_DIR_LEFT] || !n->child[TREE_DIR_RIGHT]){
 			// n has only 1 child
 			if(n == tree->root)
-			{ // replace n with it's child if n == root	
+			{ // replace n with it's child if n == root
 				n->thr = u->thr;
 				n->thr->hndl = n;
 				n->child[TREE_DIR_LEFT] = n->child[TREE_DIR_RIGHT] = NULL;
+				//uart_printf("AFTER:\r\n");
+				//thread_tree_print(tree);
 				return u;
 			}
 			else

@@ -105,7 +105,7 @@ void boot_log_write_stub(const char* str, size_t s){}
 
 #include "cpu/x86/apic.h"
 #include "cpu/spinlock.h"
-#define TEST_THREAD_COUNT	9
+#define TEST_THREAD_COUNT	16
 thread** threads;
 volatile size_t tt_start[TEST_THREAD_COUNT];
 volatile size_t tt_end[TEST_THREAD_COUNT];
@@ -127,7 +127,7 @@ void ap_test()
 			goto inf_loop;
 		uart_printf("");
 	}
-uart_printf("thread %d ended\r\n", thread_i);
+	uart_printf("thread %d ended\r\n", thread_i);
 	tt_end[thread_i] = HPET_READ_REG(timer_addr, HPET_GENREG_COUNTER);
 
 inf_loop:

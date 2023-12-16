@@ -174,6 +174,11 @@ static void endless_loop() { while(1) ; } // this loop is executed until 1st thr
 
 static void thread_tree_add(thread_tree* tree, thread* th)
 {
+	if(tree == cpu_tree_list->tree){
+		uart_printf("BEFORE ADD:\r\n");
+		thread_tree_print(tree);
+	}
+
 	uint64_t min_vruntime = 0;
 	thread_tree_node* root = tree->root;
 	if(root){
@@ -193,10 +198,20 @@ static void thread_tree_add(thread_tree* tree, thread* th)
 	n->thr = th;
 	th->hndl = n; th->tree = tree;
 	thread_tree_insert(tree, n);
+
+	if(tree == cpu_tree_list->tree){
+		uart_printf("AFTER ADD:\r\n");
+		thread_tree_print(tree);
+	}
 }
 static void thread_tree_remove(thread* th)
 {
 	thread_tree* tree = th->tree;
+	if(tree == cpu_tree_list->tree){
+		uart_printf("BEFORE REMOVE:\r\n");
+		thread_tree_print(tree);
+	}
+
 	--tree->thread_cnt;
 	tree->time_slice = tree->thread_cnt ? scheduler_latency / tree->thread_cnt : 0;
 	if(tree->time_slice < min_granularity)
@@ -205,6 +220,11 @@ static void thread_tree_remove(thread* th)
 
 	thread_tree_node* n = thread_tree_delete(tree, th->hndl);
 	kfree(n);
+
+	if(tree == cpu_tree_list->tree){
+		uart_printf("AFTER REMOVE:\r\n");
+		thread_tree_print(tree);
+	}
 }
 
 static uint64_t get_min_vruntime(thread_tree* tree)
@@ -220,6 +240,7 @@ static uint64_t get_min_vruntime(thread_tree* tree)
 
 void scheduler_queue_thread(thread* th)
 {
+	uart_printf("%p thread queue:\r\n", th);
 	thread_tree* tree = cpu_tree_list->tree;
 	spinlock_lock(&tree->lock);
 	th->vruntime = get_min_vruntime(tree);
@@ -233,19 +254,14 @@ void scheduler_queue_thread(thread* th)
 	uint8_t core_i = tree->cpu_num;
 	if(!(core_info[core_i].flags & MTASK_CORE_FLAG_BSP) && !core_info[core_i].jmp_loc)
 		ap_jump(core_i, endless_loop);
-
-	uart_printf("%p thread queue:\r\n", th);
-	print_cpu_tree_list();
 }
 void scheduler_dequeue_thread(thread* th)
 {
+	uart_printf("%p thread dequeue:\r\n", th);
 	spinlock_lock(&((thread_tree*)th->tree)->lock);
 	thread_tree_remove(th);
 	spinlock_unlock(&((thread_tree*)th->tree)->lock);
 	cpu_tree_list_move_left(th->tree);
-
-	uart_printf("%p thread dequeue:\r\n", th);
-	print_cpu_tree_list();
 }
 void scheduler_sleep_thread(thread* th, uint64_t time_ns)
 {

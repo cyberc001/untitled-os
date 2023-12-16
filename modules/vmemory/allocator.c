@@ -285,6 +285,7 @@ void alloc_tree_insertp(node* n, node* p, int dir)
 node* alloc_tree_delete_replacement(node* n)
 {
 	if(n->child[TREE_DIR_LEFT] && n->child[TREE_DIR_RIGHT]){
+		n = n->child[TREE_DIR_RIGHT];
 		while(n->child[TREE_DIR_LEFT])
 			n = n->child[TREE_DIR_LEFT];
 		return n;

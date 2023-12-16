@@ -13,7 +13,7 @@
 #define TREE_DIR_RIGHT	1
 
 #define TREE_DIR_CHILD(n) ((n) == ((n)->parent)->child[TREE_DIR_RIGHT] ? TREE_DIR_RIGHT : TREE_DIR_LEFT)
-#define TREE_GET_SIBLING(n) ((n)->parent ? (n)->parent->child[TREE_DIR_CHILD(n)] : NULL)
+#define TREE_GET_SIBLING(n) ((n)->parent ? (n)->parent->child[1 - TREE_DIR_CHILD(n)] : NULL)
 
 #define thread_tree_print(tree) thread_tree_print_r((tree)->root, 0)
 
