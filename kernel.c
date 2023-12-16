@@ -105,7 +105,7 @@ void boot_log_write_stub(const char* str, size_t s){}
 
 #include "cpu/x86/apic.h"
 #include "cpu/spinlock.h"
-#define TEST_THREAD_COUNT	8
+#define TEST_THREAD_COUNT	9
 thread** threads;
 volatile size_t tt_start[TEST_THREAD_COUNT];
 volatile size_t tt_end[TEST_THREAD_COUNT];
@@ -358,7 +358,7 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 		th_pt->state.rax = i;
 		void* ap_test_stack = kmalloc(512);
 		th_pt->state.rsp = (uintptr_t)ap_test_stack + 512;
-		th_pt->weight = 1024 + 128 * i;
+		th_pt->weight = 1024;//1024 + 128 * i;
 		//mtask_process_add_thread(&pr, th_pt);
 		mtask_scheduler_queue_thread(th_pt);
 		//kfree(th_pt);

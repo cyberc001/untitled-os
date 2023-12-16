@@ -26,6 +26,7 @@ static void thread_pqueue_heapify_down(thread_pqueue* q)
 		if(thread_wakeup_is_later(*q->heap[_min], *thr)) // heap condition is satisfied
 			break;
 		q->heap[k] = q->heap[_min];
+		k = _min;
 	}
 	q->heap[k] = thr;
 }

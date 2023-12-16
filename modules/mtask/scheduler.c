@@ -129,13 +129,14 @@ static void cpu_tree_list_move_smallest()
 			next_head->prev = NULL;
 		}
 	}
+	cpu_tree_list->prev = NULL;
 	spinlock_unlock(&cpu_tree_list_lock);
 }
 // If a thread count decreased for a cpu tree, call this function to move it to the left (closer to the fewer thread count trees)
 static void cpu_tree_list_move_left(thread_tree* tree)
 {
 	spinlock_lock(&cpu_tree_list_lock);
-	cpu_tree_lnode* cur = tree->list_ptr->prev;
+	cpu_tree_lnode* cur = tree->list_ptr->prev; // begin at the node previous to the tree in question
 
 	if(cur){ // if the tree is not at the beginning already
 		while(cur && tree->thread_cnt < cur->tree->thread_cnt)
@@ -287,7 +288,6 @@ thread* scheduler_advance_thread_queue()
 		thread* th = sleep_queue->heap[0];
 		if(!thread_should_wakeup_now(*th, timer_val))
 			break;
-		uart_printf("woke up thread %p\r\n", th);
 		thread_pqueue_pop(sleep_queue);
 		scheduler_queue_thread(th);
 		/* TEST BEGIN */
@@ -320,7 +320,6 @@ thread* scheduler_advance_thread_queue()
 				cpu_tree_list_move_left(tree);
 				scheduler_queue_thread(th); // this locks minimum thread count CPU tree - actually important
 			}
-
 		}
 		tree->last_give_time = timer_val;
 	}
