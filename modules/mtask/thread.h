@@ -38,6 +38,10 @@ typedef struct {
 	/* bunch of shit necessary only for dequeing */
 	void* tree; // rbtree that contains the node
 	void* hndl; // node in rbtree that contains the thread
+
+	/* TEST BEGIN */
+	size_t last_sched_latency;
+	/* TEST END */
 } thread;
 
 #define MTASK_SAVE_CONTEXT(thread_pt)\

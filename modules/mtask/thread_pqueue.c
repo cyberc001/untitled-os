@@ -50,8 +50,6 @@ void thread_pqueue_push(thread_pqueue* q, thread* thr)
 	}
 	q->heap[q->size++] = thr;
 	thread_pqueue_heapify_up(q);
-	for(size_t i = 0; i < q->size; ++i) uart_printf("%p ", q->heap[i]);
-	uart_printf("\r\n");
 }
 thread* thread_pqueue_pop(thread_pqueue* q)
 {

@@ -103,39 +103,49 @@ void _start(struct stivale2_struct* stivale2_struct)
 
 void boot_log_write_stub(const char* str, size_t s){}
 
-volatile int dummy_counter;
+#include "cpu/x86/apic.h"
+#include "cpu/spinlock.h"
+#define TEST_THREAD_COUNT	8
+thread** threads;
+volatile size_t tt_start[TEST_THREAD_COUNT];
+volatile size_t tt_end[TEST_THREAD_COUNT];
+volatile int test_thread_ended;
 void ap_test()
 {
-	for(;;){
-		uart_printf("ap_test 0\r\n");
-		for(int i = 0; i < 1000000; ++i)
-			++dummy_counter;
+	register int eax asm("eax");
+	int thread_i = eax;
+
+	size_t hpet_timer_blocks_cnt;
+	hpet_desc_table** hpet_timer_blocks = hpet_get_timer_blocks(&hpet_timer_blocks_cnt);
+	void* timer_addr = (void*)hpet_timer_blocks[0]->base_addr.addr;
+	uint32_t lapic_id = lapic_read(LAPIC_REG_ID) >> 24;
+	tt_start[thread_i] = HPET_READ_REG(timer_addr, HPET_GENREG_COUNTER);
+	tt_end[thread_i] = 0;
+
+	for(size_t i = 0; i < 10000000; ++i){
+		if(tt_end[thread_i])
+			goto inf_loop;
+		uart_printf("");
 	}
-}
-void ap_test1()
-{
-	for(;;){
-		uart_printf("ap_test 1\r\n");
-		for(int i = 0; i < 1000000; ++i)
-			++dummy_counter;
+uart_printf("thread %d ended\r\n", thread_i);
+	tt_end[thread_i] = HPET_READ_REG(timer_addr, HPET_GENREG_COUNTER);
+
+inf_loop:
+	if(thread_i == 0){
+		for(;;){
+			int cont = 0;
+			for(size_t i = 0; i < TEST_THREAD_COUNT; ++i)
+				if(!tt_end[i]) { cont = 1; break; }
+			if(!cont)
+				break;
+		}
+		for(size_t i = 0; i < TEST_THREAD_COUNT; ++i)
+		uart_printf("[%lu] TT: %lu\tLatency: %lu\r\n", i, tt_end[i] - tt_start[i], threads[i]->last_sched_latency);
+		for(;;){}
 	}
+	else for(;;){}
 }
-void ap_test2()
-{
-	for(;;){
-		uart_printf("ap_test 2\r\n");
-		for(int i = 0; i < 1000000; ++i)
-			++dummy_counter;
-	}
-}
-void ap_test3()
-{
-	for(;;){
-		uart_printf("ap_test 3\r\n");
-		for(int i = 0; i < 1000000; ++i)
-			++dummy_counter;
-	}
-}
+
 
 void kernel_main(struct stivale2_struct* stivale2_struct)
 {
@@ -187,14 +197,6 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	void *modfd = kmalloc(_fs.fd_size), *descfd = kmalloc(_fs.fd_size);
 	_fs.open(&_fs, modfd, "vmemory.so", FS_OPEN_READ);
 	_fs.open(&_fs, descfd, "vmemory.dsc", FS_OPEN_READ);
-
-	/*char buf[128];
-	uart_printf("INIT READ\r\n");
-	uart_printf("READ: %lu\r\n", _fs.read(&_fs, modfd, buf, 128));
-	uart_printf("\r\nBUFFER:\r\n");
-	for(size_t i = 0; i < 128; ++i)
-		uart_printf("%x ", buf[0]);
-	uart_printf("\r\n");*/
 
 	err = module_load_kernmem(&module_vmemory, &_fs, modfd, descfd);
 	if(err)
@@ -338,20 +340,22 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	else
 		boot_log_printf_status(BOOT_LOG_STATUS_SUCCESS, "Initializing multitasking module");
 
-	thread** threads = kmalloc(sizeof(void*) * 8);
-	for(size_t i = 0; i < 8; ++i)
+	size_t hpet_timer_blocks_cnt;
+	hpet_desc_table** hpet_timer_blocks = hpet_get_timer_blocks(&hpet_timer_blocks_cnt);
+	void* timer_addr = (void*)hpet_timer_blocks[0]->base_addr.addr;
+	size_t timer_res_ns = HPET_COUNTER_CLK_PERIOD(HPET_READ_REG(timer_addr, HPET_GENREG_CAP_ID));
+	timer_res_ns /= 1000000;
+
+	threads = kmalloc(sizeof(void*) * TEST_THREAD_COUNT);
+	for(size_t i = 0; i < TEST_THREAD_COUNT; ++i)
 	{ // schedule test code
 		process pr; mtask_create_process(&pr);
 		thread* th_pt = kmalloc_align(sizeof(thread), 16);
 		memset(th_pt, 0, sizeof(thread));
 		threads[i] = th_pt;
 		MTASK_SAVE_CONTEXT(th_pt);
-		switch(i % 4){
-			case 0: th_pt->state.rip = (uintptr_t)(ap_test); break;
-			case 1: th_pt->state.rip = (uintptr_t)(ap_test1); break;
-			case 2: th_pt->state.rip = (uintptr_t)(ap_test2); break;
-			case 3: th_pt->state.rip = (uintptr_t)(ap_test3); break;
-		}
+		th_pt->state.rip = (uintptr_t)(ap_test);
+		th_pt->state.rax = i;
 		void* ap_test_stack = kmalloc(512);
 		th_pt->state.rsp = (uintptr_t)ap_test_stack + 512;
 		th_pt->weight = 1024 + 128 * i;
@@ -359,8 +363,9 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 		mtask_scheduler_queue_thread(th_pt);
 		//kfree(th_pt);
 	}
-	mtask_scheduler_sleep_thread(threads[0], 1000000000);
-	mtask_scheduler_sleep_thread(threads[7], 2000000000);
+
+	for(size_t i = 0; i < TEST_THREAD_COUNT; ++i)
+		mtask_scheduler_sleep_thread(threads[i], 500000000);
 
 	void(*toggle_sts)(int) = elf_get_function_module(&module_mtask, "toggle_sts");
 	toggle_sts(1);

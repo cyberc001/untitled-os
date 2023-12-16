@@ -104,7 +104,6 @@ void sync_timers()
 // Call this function if the smallest element has had it's thread count increased and should be moved to a new position.
 static void cpu_tree_list_move_smallest()
 {
-	uart_printf("MOVE %p %p\r\n", ((thread**)0x206ed8)[0], ((thread**)0x206ed8)[1]);
 	spinlock_lock(&cpu_tree_list_lock);
 	cpu_tree_lnode* next_head = cpu_tree_list->next;
 	cpu_tree_lnode* cur = cpu_tree_list->next;
@@ -263,8 +262,6 @@ void scheduler_sleep_thread(thread* th, uint64_t time_ns)
 	spinlock_lock(&q->lock);
 	thread_pqueue_push(q, th);
 	spinlock_unlock(&q->lock);
-
-	uart_printf("size %lu top %p\r\n", q->size, q->heap[0]);
 }
 
 /* called in ap_periodic_switch.s */
@@ -290,9 +287,12 @@ thread* scheduler_advance_thread_queue()
 		thread* th = sleep_queue->heap[0];
 		if(!thread_should_wakeup_now(*th, timer_val))
 			break;
-		uart_printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!waked up thread %p\r\n", th);
+		uart_printf("woke up thread %p\r\n", th);
 		thread_pqueue_pop(sleep_queue);
 		scheduler_queue_thread(th);
+		/* TEST BEGIN */
+		th->last_sched_latency = timer_val - th->sleep_until;
+		/* TEST END */
 	}
 
 	thread_tree* tree = &cpu_trees[lapic_id];
