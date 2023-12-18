@@ -22,7 +22,7 @@ static void thread_pqueue_heapify_down(thread_pqueue* q)
 	while(k < q->size / 2){
 		if(k*2 + 1 >= q->size)
 			break;
-		size_t _min = k*2 + ( k*2 + 2 < q->size && thread_wakeup_is_earlier(*q->heap[k*2 + 2], *q->heap[k*2 + 1]) ) ? 2 : 1;
+		size_t _min = k*2 + (( k*2 + 2 < q->size && thread_wakeup_is_earlier(*q->heap[k*2 + 2], *q->heap[k*2 + 1]) ) ? 2 : 1);
 		if(thread_wakeup_is_later(*q->heap[_min], *thr)) // heap condition is satisfied
 			break;
 		q->heap[k] = q->heap[_min];
@@ -57,6 +57,5 @@ thread* thread_pqueue_pop(thread_pqueue* q)
 	thread* thr = q->heap[0];
 	q->heap[0] = q->heap[--q->size];
 	thread_pqueue_heapify_down(q);
-
 	return thr;
 }

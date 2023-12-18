@@ -85,8 +85,6 @@ void* stivale2_get_tag(struct stivale2_struct* stivale2_struct, uint64_t id)
 	return NULL;
 }
 
-
-
 struct mmap_entry{
 	void* vaddr; void* paddr;
 	uint64_t usize;
@@ -122,10 +120,11 @@ void ap_test()
 	tt_start[thread_i] = HPET_READ_REG(timer_addr, HPET_GENREG_COUNTER);
 	tt_end[thread_i] = 0;
 
+	int calc_smth = 0;
 	for(size_t i = 0; i < 10000000; ++i){
 		if(tt_end[thread_i])
 			goto inf_loop;
-		uart_printf("");
+		calc_smth = ((calc_smth + 1312) >> 3) % 308959120 * 984859812;
 	}
 	uart_printf("thread %d ended\r\n", thread_i);
 	tt_end[thread_i] = HPET_READ_REG(timer_addr, HPET_GENREG_COUNTER);
@@ -139,11 +138,28 @@ inf_loop:
 			if(!cont)
 				break;
 		}
-		for(size_t i = 0; i < TEST_THREAD_COUNT; ++i)
-		uart_printf("[%lu] TT: %lu\tLatency: %lu\r\n", i, tt_end[i] - tt_start[i], threads[i]->last_sched_latency);
+
+		size_t avg_tt = 0, avg_schlat = 0;
+		size_t min_tt = (size_t)-1, min_schlat = (size_t)-1;
+		size_t max_tt = 0, max_schlat = 0;
+		for(size_t i = 0; i < TEST_THREAD_COUNT; ++i){
+			size_t tt = tt_end[i] - tt_start[i], schlat = threads[i]->last_sched_latency;
+			uart_printf("[%lu] TT: %lu\tLatency: %lu\r\n", i, tt, schlat);
+			avg_tt += tt; avg_schlat += schlat;
+			if(tt < min_tt) min_tt = tt;
+			if(schlat < min_schlat) min_schlat = schlat;
+			if(tt > max_tt) max_tt = tt;
+			if(schlat > max_schlat) max_schlat = schlat;
+		}
+		avg_tt /= TEST_THREAD_COUNT; avg_schlat /= TEST_THREAD_COUNT;
+		uart_printf("[AVG] TT: %lu\tLatency: %lu\r\n", avg_tt, avg_schlat);
+		uart_printf("[MIN] TT: %lu\tLatency: %lu\r\n", min_tt, min_schlat);
+		uart_printf("[MAX] TT: %lu\tLatency: %lu\r\n", max_tt, max_schlat);
+
 		for(;;){}
 	}
-	else for(;;){}
+	else
+		for(;;){}
 }
 
 
@@ -363,7 +379,6 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 		mtask_scheduler_queue_thread(th_pt);
 		//kfree(th_pt);
 	}
-
 	for(size_t i = 0; i < TEST_THREAD_COUNT; ++i)
 		mtask_scheduler_sleep_thread(threads[i], 500000000);
 

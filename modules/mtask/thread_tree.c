@@ -1,17 +1,20 @@
 #include "thread_tree.h"
+#include "cpu/x86/apic.h"
 
 static thread_tree_node* thread_tree_rotate(thread_tree* tree, thread_tree_node* p, int dir)
 {
+	if(p == tree->root)
+		p->parent = NULL;
+
 	thread_tree_node* g = p->parent;
 	thread_tree_node* s = p->child[1 - dir];
-	thread_tree_node* c = s ? s->child[dir] : NULL;
+	if(!s)
+		uart_printf("RBTREE rotation ERROR %p %p %d %u\r\n", tree, p, dir, lapic_read(LAPIC_REG_ID) >> 24);
+	thread_tree_node* c = s->child[dir];
 
-	p->child[1 - dir] = c;
-	if(c) c->parent = p;
-	if(s) s->child[dir] = p;
-	p->parent = s;
+	p->child[1 - dir] = c; if(c) c->parent = p;
+	s->child[dir] = p; p->parent = s;
 	s->parent = g;
-
 	if(g)
 		g->child[p == g->child[TREE_DIR_RIGHT] ? TREE_DIR_RIGHT : TREE_DIR_LEFT] = s;
 	else
@@ -23,6 +26,8 @@ static void thread_tree_insertp(thread_tree* tree, thread_tree_node* n, thread_t
 {
 	thread_tree_node *g,		// grandparent
 			 *u;		// uncle
+
+	tree->root->parent = NULL;
 
 	n->clr = TREE_CLR_RED;
 	n->child[TREE_DIR_LEFT] = n->child[TREE_DIR_RIGHT] = NULL;
@@ -40,7 +45,7 @@ static void thread_tree_insertp(thread_tree* tree, thread_tree_node* n, thread_t
 
 		if(!(g = p->parent))
 		{ // case 4: parent is red and root
-		  	p->clr = TREE_CLR_RED;
+			p->clr = TREE_CLR_RED;
 			return;
 		}
 
@@ -54,7 +59,7 @@ static void thread_tree_insertp(thread_tree* tree, thread_tree_node* n, thread_t
 				n = p;
 				p = g->child[dir];
 			} // case 5 --> case 6
-			// case 6: parent is red, uncle is black, n is outer grandchild
+			// case 6: parent is red, uncle is black, n is outer grandchild	
 			thread_tree_rotate(tree, g, 1 - dir);
 			p->clr = TREE_CLR_BLACK;
 			g->clr = TREE_CLR_RED;
@@ -93,143 +98,105 @@ void thread_tree_insert(thread_tree* tree, thread_tree_node* n)
 	}
 }
 
-static thread_tree_node* thread_tree_delete_replacement(thread_tree_node* n)
-{
-	if(n->child[TREE_DIR_LEFT] && n->child[TREE_DIR_RIGHT]){
-		n = n->child[TREE_DIR_RIGHT];
-		while(n->child[TREE_DIR_LEFT])
-			n = n->child[TREE_DIR_LEFT];
-		return n;
-	}
-	if(!n->child[TREE_DIR_LEFT] && !n->child[TREE_DIR_RIGHT])
-		return NULL;
-	return n->child[TREE_DIR_LEFT] ? n->child[TREE_DIR_LEFT] : n->child[TREE_DIR_RIGHT];
-}
-static void thread_tree_delete_fixbb(thread_tree* tree, thread_tree_node* n) // fix 2 black nodes in a row
-{
-	if(n == tree->root)
-		return;
-
-	thread_tree_node *s = TREE_GET_SIBLING(n), *p = n->parent;
-	if(!s){
-		// no sibling - proceed up the tree
-		thread_tree_delete_fixbb(tree, p);
-	}
-	else{
-		if(s->clr == TREE_CLR_RED){
-			p->clr = TREE_CLR_RED;
-			s->clr = TREE_CLR_BLACK;
-			thread_tree_rotate(tree, p, TREE_DIR_CHILD(s));
-			thread_tree_delete_fixbb(tree, n);
-		}
-		else{
-			if((s->child[TREE_DIR_LEFT] && s->child[TREE_DIR_LEFT]->clr  == TREE_CLR_RED)
-			|| (s->child[TREE_DIR_RIGHT] && s->child[TREE_DIR_RIGHT]->clr == TREE_CLR_RED))
-			{ // at least 1 red child
-				if(s->child[TREE_DIR_LEFT] && s->child[TREE_DIR_LEFT]->clr == TREE_CLR_RED)
-				{ // on the left
-					if(TREE_DIR_CHILD(s) == TREE_DIR_LEFT)
-					{ // left left
-					  	s->child[TREE_DIR_LEFT]->clr = s->clr;
-						s->clr = p->clr;
-						thread_tree_rotate(tree, p, TREE_DIR_RIGHT);
-					}
-					else
-					{ // right left
-						s->child[TREE_DIR_LEFT]->clr = p->clr;
-						thread_tree_rotate(tree, s, TREE_DIR_RIGHT);
-						thread_tree_rotate(tree, p, TREE_DIR_LEFT);
-					}
-				}
-				else
-				{ // on the right
-					if(TREE_DIR_CHILD(s) == TREE_DIR_LEFT)
-					{ // left right
-						s->child[TREE_DIR_RIGHT]->clr = p->clr;
-						thread_tree_rotate(tree, s, TREE_DIR_LEFT);
-						thread_tree_rotate(tree, p, TREE_DIR_RIGHT);
-					}
-					else
-					{ // right right
-						s->child[TREE_DIR_RIGHT]->clr = s->clr;
-						s->clr = p->clr;
-						thread_tree_rotate(tree, p, TREE_DIR_LEFT);
-					}
-				}
-				p->clr = TREE_CLR_BLACK;
-			}
-			else
-			{ // 2 black children
-				s->clr = TREE_CLR_RED;
-				if(p->clr == TREE_CLR_BLACK)
-					thread_tree_delete_fixbb(tree, n);
-				else
-					p->clr = TREE_CLR_BLACK;
-			}
-		}
-	}
-}
-
+thread_tree_node* rbdelete2(thread_tree* tree, thread_tree_node* n);
 thread_tree_node* thread_tree_delete(thread_tree* tree, thread_tree_node* n)
 {
-	//uart_printf("BEFORE:\r\n");
-	//thread_tree_print(tree);
+	tree->root->parent = NULL;
 
-	while(n)
-	{
-		thread_tree_node* u = thread_tree_delete_replacement(n);
-		int un_is_black = (!u || u->clr == TREE_CLR_BLACK) && n->clr == TREE_CLR_BLACK;
-
-		thread_tree_node* p = n->parent;
-
-		if(!u){ // n is a leaf	
-			if(n == tree->root)
-				tree->root = NULL;
-			else{
-				if(un_is_black) // n and u are black, n is a leaf
-					thread_tree_delete_fixbb(tree, n);
-				else
-					if(TREE_GET_SIBLING(n))
-						TREE_GET_SIBLING(n)->clr = TREE_CLR_RED;
-
-				// delete n
-				p->child[TREE_DIR_CHILD(n)] = NULL;
-			}
+	if(n->child[TREE_DIR_LEFT] && n->child[TREE_DIR_RIGHT]){ // 2 children
+		thread_tree_node* s = n->child[TREE_DIR_RIGHT]; //successor
+		while(s->child[TREE_DIR_LEFT])
+			s = s->child[TREE_DIR_LEFT];
+		n->thr = s->thr;
+		n->thr->hndl = n;
+		return thread_tree_delete(tree, s);
+	}
+	else if(n->child[TREE_DIR_LEFT] || n->child[TREE_DIR_RIGHT]){ // 1 child
+		if(n->parent){
+			int dir = TREE_DIR_CHILD(n);
+			n->parent->child[dir] = n->child[n->child[TREE_DIR_LEFT] ? TREE_DIR_LEFT : TREE_DIR_RIGHT];
+			n->parent->child[dir] = TREE_CLR_BLACK;
+		}
+		else {
+			tree->root = n->child[n->child[TREE_DIR_LEFT] ? TREE_DIR_LEFT : TREE_DIR_RIGHT];
+		}
+		return n;
+	}
+	else { // no children
+		int dir = TREE_DIR_CHILD(n);
+		if(n == tree->root){
+			tree->root = NULL;
 			return n;
 		}
-		
-		if(!n->child[TREE_DIR_LEFT] || !n->child[TREE_DIR_RIGHT]){
-			// n has only 1 child
-			if(n == tree->root)
-			{ // replace n with it's child if n == root
-				n->thr = u->thr;
-				n->thr->hndl = n;
-				n->child[TREE_DIR_LEFT] = n->child[TREE_DIR_RIGHT] = NULL;
-				//uart_printf("AFTER:\r\n");
-				//thread_tree_print(tree);
-				return u;
-			}
-			else
-			{ // delete n from the tree and move u up
-				p->child[TREE_DIR_CHILD(n)] = u;
-				u->parent = p;
-				if(un_is_black)
-					thread_tree_delete_fixbb(tree, n);
-				else
-					u->clr = TREE_CLR_BLACK;
-				return n;
-			}
+		else if(n->clr == TREE_CLR_RED){
+			n->parent->child[dir] = NULL;
+			return n;
 		}
-		// swap u and n
-		thread_tree_node tmp;
-		tmp.thr = n->thr;
-		n->thr = u->thr;
-		u->thr = tmp.thr;
-		n->thr->hndl = n;
-		u->thr->hndl = u;
-		n = u;
+		else
+			return rbdelete2(tree, n);
 	}
-	return NULL;
+}
+
+thread_tree_node* rbdelete2(thread_tree* tree, thread_tree_node* n)
+{
+	thread_tree_node* p = n->parent;
+	thread_tree_node *s, *c, *d;
+	int dir = TREE_DIR_CHILD(n);
+	p->child[dir] = NULL;
+	goto start_d;
+
+	do {
+		dir = TREE_DIR_CHILD(n);
+start_d:
+		s = p->child[1-dir];
+		d = s->child[1-dir];
+		c = s->child[dir];
+		if(s->clr == TREE_CLR_RED)
+			goto case_d3;
+		if(d && d->clr == TREE_CLR_RED)
+			goto case_d6;
+		if(c && c->clr == TREE_CLR_RED)
+			goto case_d5;
+		if(p->clr == TREE_CLR_RED)
+			goto case_d4;
+
+case_d3:
+		thread_tree_rotate(tree, p, dir);
+		p->clr = TREE_CLR_RED;
+		s->clr = TREE_CLR_BLACK;
+		s = c;
+		d = s->child[1 - dir];
+		if(d && d->clr == TREE_CLR_RED)
+			goto case_d6;
+		c = s->child[dir];
+		if(c && c->clr == TREE_CLR_RED)
+			goto case_d5;
+
+case_d4:
+		s->clr = TREE_CLR_RED;
+		p->clr = TREE_CLR_BLACK;
+		return n;
+
+case_d5:
+		thread_tree_rotate(tree, s, 1 - dir);
+		s->clr = TREE_CLR_RED;
+		c->clr = TREE_CLR_BLACK;
+		d = s;
+		s = c;
+case_d6:
+		thread_tree_rotate(tree, p, dir);
+		s->clr = p->clr;
+		p->clr = TREE_CLR_BLACK;
+		d->clr = TREE_CLR_BLACK;
+		return n;
+
+		// case_d2
+		s->clr = TREE_CLR_RED;
+		n = p;
+	} while((p = n->parent));
+
+	// case_d1
+	return n;
 }
 
 void thread_tree_print_r(thread_tree_node* n, unsigned depth)

@@ -174,10 +174,11 @@ static void endless_loop() { while(1) ; } // this loop is executed until 1st thr
 
 static void thread_tree_add(thread_tree* tree, thread* th)
 {
-	if(tree == cpu_tree_list->tree){
-		uart_printf("BEFORE ADD:\r\n");
+	uint32_t lapic_id = lapic_read(LAPIC_REG_ID) >> 24;
+	/*if(lapic_id == 0){
+		uart_printf("BEFORE ADD %p (tree %p):\r\n", th, tree);
 		thread_tree_print(tree);
-	}
+	}*/
 
 	uint64_t min_vruntime = 0;
 	thread_tree_node* root = tree->root;
@@ -199,18 +200,20 @@ static void thread_tree_add(thread_tree* tree, thread* th)
 	th->hndl = n; th->tree = tree;
 	thread_tree_insert(tree, n);
 
-	if(tree == cpu_tree_list->tree){
-		uart_printf("AFTER ADD:\r\n");
+	/*if(lapic_id == 0){
+		uart_printf("AFTER ADD %p (tree %p):\r\n", th, tree);
 		thread_tree_print(tree);
-	}
+	}*/
 }
 static void thread_tree_remove(thread* th)
 {
 	thread_tree* tree = th->tree;
-	if(tree == cpu_tree_list->tree){
-		uart_printf("BEFORE REMOVE:\r\n");
+
+	uint32_t lapic_id = lapic_read(LAPIC_REG_ID) >> 24;
+	/*if(lapic_id == 0){
+		uart_printf("BEFORE REMOVE %p (tree %p):\r\n", th, tree);
 		thread_tree_print(tree);
-	}
+	}*/
 
 	--tree->thread_cnt;
 	tree->time_slice = tree->thread_cnt ? scheduler_latency / tree->thread_cnt : 0;
@@ -221,10 +224,13 @@ static void thread_tree_remove(thread* th)
 	thread_tree_node* n = thread_tree_delete(tree, th->hndl);
 	kfree(n);
 
-	if(tree == cpu_tree_list->tree){
-		uart_printf("AFTER REMOVE:\r\n");
+	/*if(lapic_id == 0)
+		uart_printf("KFREE %p\r\n", n);*/
+
+	/*if(lapic_id == 0){
+		uart_printf("AFTER REMOVE %p (tree %p):\r\n", th, tree);
 		thread_tree_print(tree);
-	}
+	}*/
 }
 
 static uint64_t get_min_vruntime(thread_tree* tree)
@@ -257,7 +263,7 @@ void scheduler_queue_thread(thread* th)
 }
 void scheduler_dequeue_thread(thread* th)
 {
-	uart_printf("%p thread dequeue:\r\n", th);
+	uart_printf("%p thread dequeue %p:\r\n", th, th->tree);
 	spinlock_lock(&((thread_tree*)th->tree)->lock);
 	thread_tree_remove(th);
 	spinlock_unlock(&((thread_tree*)th->tree)->lock);
@@ -265,7 +271,7 @@ void scheduler_dequeue_thread(thread* th)
 }
 void scheduler_sleep_thread(thread* th, uint64_t time_ns)
 {
-	uart_printf("%p thread sleep for %lu ns:\r\n", th, time_ns);
+	uart_printf("%p thread sleep for %lu ns %p:\r\n", th, time_ns, th->tree);
 	time_ns /= timer_res_ns; // convert to timer ticks
 
 	th->flags |= THREAD_FLAG_SLEEPING;
@@ -354,14 +360,29 @@ thread* scheduler_advance_thread_queue()
 		spinlock_unlock(&tree->lock);
 		return NULL;
 	}
+
+	thread_tree_node* t = root;
+	/*if(lapic_id == 0){
+		uart_printf("BEFORE %p (tree %p):\r\n", t->thr, tree);
+		thread_tree_print(tree);
+	}*/
 	while(root->child[TREE_DIR_LEFT])
 		root = root->child[TREE_DIR_LEFT];
 	// Incement it's runtime and re-insert it in the tree
 	root->thr->vruntime += time_passed * timer_res_ns * default_weight / root->thr->weight;
 	thread_tree_node root_cpy = *root;
 	thread_tree_node* root_addr = thread_tree_delete(tree, root);
+	/*if(lapic_id == 0){
+		uart_printf("AFTER DELETE %p (tree %p):\r\n", t->thr, tree);
+		thread_tree_print(tree);
+	}*/
 	*root_addr = root_cpy;
+	//if(lapic_id == 0) uart_printf("ROOT ADDR: %p\r\n", root_addr);
 	thread_tree_insert(tree, root_addr);
+	/*if(lapic_id == 0){
+		uart_printf("AFTER INSERT %p (tree %p):\r\n", t->thr, tree);
+		thread_tree_print(tree);
+	}*/
 	spinlock_unlock(&tree->lock);
 
 	scheduler_prev_threads[lapic_id] = root_addr->thr;

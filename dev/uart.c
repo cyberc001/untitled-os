@@ -11,13 +11,10 @@ void uart_putchar(char c)
 {
 	cpu_out8(UART_PORT, c);
 }
-spinlock _lock = {0};
 void uart_write(const char* dat, size_t s)
 {
-	spinlock_lock(&_lock);
 	for(size_t i = 0; i < s; ++i)
 		cpu_out8(UART_PORT, dat[i]);
-	spinlock_unlock(&_lock);
 }
 
 void uart_puts(const char* str)
