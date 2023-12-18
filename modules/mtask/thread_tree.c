@@ -114,8 +114,10 @@ thread_tree_node* thread_tree_delete(thread_tree* tree, thread_tree_node* n)
 	else if(n->child[TREE_DIR_LEFT] || n->child[TREE_DIR_RIGHT]){ // 1 child
 		if(n->parent){
 			int dir = TREE_DIR_CHILD(n);
-			n->parent->child[dir] = n->child[n->child[TREE_DIR_LEFT] ? TREE_DIR_LEFT : TREE_DIR_RIGHT];
-			n->parent->child[dir] = TREE_CLR_BLACK;
+			thread_tree_node* child_replace = n->child[n->child[TREE_DIR_LEFT] ? TREE_DIR_LEFT : TREE_DIR_RIGHT];
+			n->parent->child[dir] = child_replace;
+			child_replace->clr = TREE_CLR_BLACK;
+			child_replace->parent = n->parent;
 		}
 		else {
 			tree->root = n->child[n->child[TREE_DIR_LEFT] ? TREE_DIR_LEFT : TREE_DIR_RIGHT];
@@ -141,6 +143,8 @@ thread_tree_node* rbdelete2(thread_tree* tree, thread_tree_node* n)
 {
 	thread_tree_node* p = n->parent;
 	thread_tree_node *s, *c, *d;
+	//uart_printf("START %p %p\r\n", n, p);
+	//thread_tree_print(tree);
 	int dir = TREE_DIR_CHILD(n);
 	p->child[dir] = NULL;
 	goto start_d;
@@ -148,7 +152,11 @@ thread_tree_node* rbdelete2(thread_tree* tree, thread_tree_node* n)
 	do {
 		dir = TREE_DIR_CHILD(n);
 start_d:
-		s = p->child[1-dir];
+		s = p->child[1-dir]; 
+		/*if(!s){ 
+			uart_printf("BAD %p %p %p\r\n", n, p, p->child[dir-1]);
+			thread_tree_print(tree);
+		}*/
 		d = s->child[1-dir];
 		c = s->child[dir];
 		if(s->clr == TREE_CLR_RED)
@@ -206,7 +214,7 @@ void thread_tree_print_r(thread_tree_node* n, unsigned depth)
 		uart_printf("--\r\n"); // it's a leaf
 		return;
 	}
-	uart_printf("%c w %lu vr %lu addr %p (thr %p)\r\n", n->clr == TREE_CLR_BLACK ? 'B' : 'R', n->thr->weight, n->thr->vruntime, n, n->thr);
+	uart_printf("%c w %lu vr %lu addr %p (thr %p) (par %p)\r\n", n->clr == TREE_CLR_BLACK ? 'B' : 'R', n->thr->weight, n->thr->vruntime, n, n->thr, n->parent);
 
 	thread_tree_print_r(n->child[TREE_DIR_LEFT], depth + 1);
 	thread_tree_print_r(n->child[TREE_DIR_RIGHT], depth + 1);

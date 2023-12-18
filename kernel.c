@@ -105,6 +105,7 @@ void boot_log_write_stub(const char* str, size_t s){}
 #include "cpu/spinlock.h"
 #define TEST_THREAD_COUNT	16
 thread** threads;
+void(*mtask_scheduler_dequeue_thread)(thread*);
 volatile size_t tt_start[TEST_THREAD_COUNT];
 volatile size_t tt_end[TEST_THREAD_COUNT];
 volatile int test_thread_ended;
@@ -116,17 +117,21 @@ void ap_test()
 	size_t hpet_timer_blocks_cnt;
 	hpet_desc_table** hpet_timer_blocks = hpet_get_timer_blocks(&hpet_timer_blocks_cnt);
 	void* timer_addr = (void*)hpet_timer_blocks[0]->base_addr.addr;
-	uint32_t lapic_id = lapic_read(LAPIC_REG_ID) >> 24;
-	tt_start[thread_i] = HPET_READ_REG(timer_addr, HPET_GENREG_COUNTER);
 	tt_end[thread_i] = 0;
 
 	int calc_smth = 0;
-	for(size_t i = 0; i < 10000000; ++i){
+	for(size_t i = 0; i < 1000000000/*10000000 * 5*/; ++i){
 		if(tt_end[thread_i])
 			goto inf_loop;
 		calc_smth = ((calc_smth + 1312) >> 3) % 308959120 * 984859812;
+
+		//size_t rbp; asm("\t movq %%rbx,%0" : "=r"(rbp));
+		//uint32_t lapic_id = lapic_read(LAPIC_REG_ID) >> 24;
+		//if(lapic_id == 0 && i % 10000 == 0) uart_printf("%p %lu %lu\r\n", threads[thread_i], i, rbp);
 	}
-	uart_printf("thread %d ended\r\n", thread_i);
+
+	uint32_t lapic_id = lapic_read(LAPIC_REG_ID) >> 24;
+	uart_printf("!!thread %d ended %lu %lu %u %p\r\n", thread_i, tt_start[thread_i], HPET_READ_REG(timer_addr, HPET_GENREG_COUNTER), lapic_id, threads[thread_i]);
 	tt_end[thread_i] = HPET_READ_REG(timer_addr, HPET_GENREG_COUNTER);
 
 inf_loop:
@@ -158,8 +163,9 @@ inf_loop:
 
 		for(;;){}
 	}
-	else
+	else{
 		for(;;){}
+	}
 }
 
 
@@ -342,7 +348,7 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	//void(*mtask_save_context)() = elf_get_function_module(&module_mtask, "save_context");
 	thread*(*mtask_process_add_thread)(process*, thread*) = elf_get_function_module(&module_mtask, "process_add_thread");
 	void(*mtask_scheduler_queue_thread)(thread*) = elf_get_function_module(&module_mtask, "scheduler_queue_thread");
-	void(*mtask_scheduler_dequeue_thread)(thread*) = elf_get_function_module(&module_mtask, "scheduler_dequeue_thread");
+	mtask_scheduler_dequeue_thread = elf_get_function_module(&module_mtask, "scheduler_dequeue_thread");
 	void(*mtask_scheduler_sleep_thread)(thread*, uint64_t) = elf_get_function_module(&module_mtask, "scheduler_sleep_thread");
 
 	uart_printf("MTASK base: %p\r\n", module_mtask.elf_data);
@@ -372,15 +378,17 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 		MTASK_SAVE_CONTEXT(th_pt);
 		th_pt->state.rip = (uintptr_t)(ap_test);
 		th_pt->state.rax = i;
-		void* ap_test_stack = kmalloc(512);
-		th_pt->state.rsp = (uintptr_t)ap_test_stack + 512;
+		void* ap_test_stack = kmalloc(1024);
+		th_pt->state.rsp = th_pt->state.rbp = (uintptr_t)ap_test_stack + 1024;
 		th_pt->weight = 1024;//1024 + 128 * i;
 		//mtask_process_add_thread(&pr, th_pt);
 		mtask_scheduler_queue_thread(th_pt);
 		//kfree(th_pt);
 	}
-	for(size_t i = 0; i < TEST_THREAD_COUNT; ++i)
-		mtask_scheduler_sleep_thread(threads[i], 500000000);
+	for(size_t i = 0; i < TEST_THREAD_COUNT; ++i){
+		tt_start[i] = HPET_READ_REG(timer_addr, HPET_GENREG_COUNTER) + (500000000 + 10000000*i) / timer_res_ns;
+		mtask_scheduler_sleep_thread(threads[i], 500000000 + 10000000*i);
+	}
 
 	void(*toggle_sts)(int) = elf_get_function_module(&module_mtask, "toggle_sts");
 	toggle_sts(1);

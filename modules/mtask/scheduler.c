@@ -37,6 +37,7 @@ extern uint64_t _ts_scheduler_advance_thread_queue[1];
 extern uint64_t _ts_scheduler_prev_threads[1];
 thread* scheduler_advance_thread_queue();
 thread** scheduler_prev_threads;
+thread** scheduler_cur_threads;
 
 static void* timer_addr;
 static uint64_t* timer_prev_val;
@@ -75,6 +76,10 @@ int scheduler_init()
 	for(uint8_t i = 0; i < core_num; ++i)
 		scheduler_prev_threads[i] = NULL;
 	*_ts_scheduler_prev_threads = (uintptr_t)scheduler_prev_threads;
+
+	scheduler_cur_threads = kmalloc_align(sizeof(thread*) * core_num, SCHEDULER_THREAD_ALIGN);
+	for(uint8_t i = 0; i < core_num; ++i)
+		scheduler_cur_threads[i] = NULL;
 
 	size_t hpet_timer_blocks_cnt;
 	hpet_desc_table** hpet_timer_blocks = hpet_get_timer_blocks(&hpet_timer_blocks_cnt);
@@ -292,6 +297,11 @@ static uint64_t ts_time_left = 0; // tracks time before an actual task switch
 thread* scheduler_advance_thread_queue()
 {
 	uint32_t lapic_id = lapic_read(LAPIC_REG_ID) >> 24;
+	if(lapic_id == 0){
+		//uart_printf("current thread: %p\r\n", scheduler_cur_threads[lapic_id]);
+		//if(scheduler_cur_threads[lapic_id])
+		//	uart_printf("switched rbx to: %lu (%p)\r\n", scheduler_cur_threads[lapic_id]->state.rbx, scheduler_cur_threads[lapic_id]);
+	}
 
 	// Measure time passed since last interrupt
 	uint64_t timer_val = HPET_READ_REG(timer_addr, HPET_GENREG_COUNTER);
@@ -348,43 +358,63 @@ thread* scheduler_advance_thread_queue()
 
 	// Check if time slice allocated for this thread has passed
 	if(time_passed < tree->time_slice){
-		scheduler_prev_threads[lapic_id] = NULL;
+		scheduler_prev_threads[lapic_id] = scheduler_cur_threads[lapic_id];
+		//if(lapic_id == 0)
+		//	uart_printf("save to thread: %p\r\n", scheduler_prev_threads[lapic_id]);
+		//scheduler_prev_threads[lapic_id] = NULL;
 		spinlock_unlock(&tree->lock);
 		return NULL;
 	}
 	timer_prev_val[lapic_id] = timer_val;
 
-	// Find thread with minimum vruntime
+	// Find current thread
 	thread_tree_node* root = tree->root;
 	if(!root){
 		spinlock_unlock(&tree->lock);
 		return NULL;
 	}
 
-	thread_tree_node* t = root;
-	/*if(lapic_id == 0){
-		uart_printf("BEFORE %p (tree %p):\r\n", t->thr, tree);
-		thread_tree_print(tree);
-	}*/
-	while(root->child[TREE_DIR_LEFT])
-		root = root->child[TREE_DIR_LEFT];
+	if(!scheduler_cur_threads[lapic_id]){
+		while(root->child[TREE_DIR_LEFT])
+			root = root->child[TREE_DIR_LEFT];
+	}
+	else
+		root = scheduler_cur_threads[lapic_id]->hndl;
+
 	// Incement it's runtime and re-insert it in the tree
 	root->thr->vruntime += time_passed * timer_res_ns * default_weight / root->thr->weight;
 	thread_tree_node root_cpy = *root;
+
+	/*if(lapic_id == 0){
+		uart_printf("BEFORE\r\n");
+		thread_tree_print(tree);
+	}*/
 	thread_tree_node* root_addr = thread_tree_delete(tree, root);
 	/*if(lapic_id == 0){
-		uart_printf("AFTER DELETE %p (tree %p):\r\n", t->thr, tree);
+		uart_printf("DELETE %p\r\n", root->thr);
 		thread_tree_print(tree);
 	}*/
 	*root_addr = root_cpy;
-	//if(lapic_id == 0) uart_printf("ROOT ADDR: %p\r\n", root_addr);
 	thread_tree_insert(tree, root_addr);
 	/*if(lapic_id == 0){
-		uart_printf("AFTER INSERT %p (tree %p):\r\n", t->thr, tree);
+		uart_printf("INSERT %p\r\n", root_addr->thr);
 		thread_tree_print(tree);
 	}*/
 	spinlock_unlock(&tree->lock);
 
-	scheduler_prev_threads[lapic_id] = root_addr->thr;
-	return root_addr->thr;
+//	if(lapic_id == 2)
+//		uart_printf("switched rbx from: %lu (%p)\r\n", root_addr->thr->state.rbx, root_addr->thr);
+
+
+	// Find thread with minimum vruntime
+	root = tree->root;
+	while(root->child[TREE_DIR_LEFT])
+		root = root->child[TREE_DIR_LEFT];
+	scheduler_cur_threads[lapic_id] = scheduler_prev_threads[lapic_id] = root->thr;
+	if(lapic_id == 0){
+		//uart_printf("current thread switched: %p\r\n", scheduler_cur_threads[lapic_id]);
+		//uart_printf("save to thread: %p\r\n", scheduler_prev_threads[lapic_id]);
+	}
+
+	return root->thr;
 }
