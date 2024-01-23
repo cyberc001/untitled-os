@@ -152,7 +152,7 @@ thread_tree_node* rbdelete2(thread_tree* tree, thread_tree_node* n)
 	do {
 		dir = TREE_DIR_CHILD(n);
 start_d:
-		s = p->child[1-dir]; 
+		s = p->child[1-dir];
 		/*if(!s){ 
 			uart_printf("BAD %p %p %p\r\n", n, p, p->child[dir-1]);
 			thread_tree_print(tree);
@@ -167,7 +167,7 @@ start_d:
 			goto case_d5;
 		if(p->clr == TREE_CLR_RED)
 			goto case_d4;
-
+		goto case_d2;
 case_d3:
 		thread_tree_rotate(tree, p, dir);
 		p->clr = TREE_CLR_RED;
@@ -179,12 +179,10 @@ case_d3:
 		c = s->child[dir];
 		if(c && c->clr == TREE_CLR_RED)
 			goto case_d5;
-
 case_d4:
 		s->clr = TREE_CLR_RED;
 		p->clr = TREE_CLR_BLACK;
 		return n;
-
 case_d5:
 		thread_tree_rotate(tree, s, 1 - dir);
 		s->clr = TREE_CLR_RED;
@@ -198,7 +196,7 @@ case_d6:
 		d->clr = TREE_CLR_BLACK;
 		return n;
 
-		// case_d2
+case_d2:
 		s->clr = TREE_CLR_RED;
 		n = p;
 	} while((p = n->parent));
