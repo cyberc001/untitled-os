@@ -215,11 +215,6 @@ static void thread_tree_remove(thread* th)
 	thread_tree* tree = th->tree;
 
 	uint32_t lapic_id = lapic_read(LAPIC_REG_ID) >> 24;
-	/*if(lapic_id == 0){
-		uart_printf("BEFORE REMOVE %p (tree %p):\r\n", th, tree);
-		thread_tree_print(tree);
-	}*/
-
 	--tree->thread_cnt;
 	tree->time_slice = tree->thread_cnt ? scheduler_latency / tree->thread_cnt : 0;
 	if(tree->time_slice < min_granularity)
@@ -228,14 +223,6 @@ static void thread_tree_remove(thread* th)
 
 	thread_tree_node* n = thread_tree_delete(tree, th->hndl);
 	kfree(n);
-
-	/*if(lapic_id == 0)
-		uart_printf("KFREE %p\r\n", n);*/
-
-	/*if(lapic_id == 0){
-		uart_printf("AFTER REMOVE %p (tree %p):\r\n", th, tree);
-		thread_tree_print(tree);
-	}*/
 }
 
 static uint64_t get_min_vruntime(thread_tree* tree)
@@ -297,11 +284,11 @@ static uint64_t ts_time_left = 0; // tracks time before an actual task switch
 thread* scheduler_advance_thread_queue()
 {
 	uint32_t lapic_id = lapic_read(LAPIC_REG_ID) >> 24;
-	if(lapic_id == 0){
+	//if(lapic_id == 0){
 		//uart_printf("current thread: %p\r\n", scheduler_cur_threads[lapic_id]);
 		//if(scheduler_cur_threads[lapic_id])
 		//	uart_printf("switched rbx to: %lu (%p)\r\n", scheduler_cur_threads[lapic_id]->state.rbx, scheduler_cur_threads[lapic_id]);
-	}
+	//}
 
 	// Measure time passed since last interrupt
 	uint64_t timer_val = HPET_READ_REG(timer_addr, HPET_GENREG_COUNTER);
@@ -367,6 +354,10 @@ thread* scheduler_advance_thread_queue()
 	}
 	timer_prev_val[lapic_id] = timer_val;
 
+	/* TEST BEGIN */
+	uint64_t ts_time_begin = HPET_READ_REG(timer_addr, HPET_GENREG_COUNTER);
+	/* TEST END */
+
 	// Find current thread
 	thread_tree_node* root = tree->root;
 	if(!root){
@@ -411,10 +402,15 @@ thread* scheduler_advance_thread_queue()
 	while(root->child[TREE_DIR_LEFT])
 		root = root->child[TREE_DIR_LEFT];
 	scheduler_cur_threads[lapic_id] = scheduler_prev_threads[lapic_id] = root->thr;
-	if(lapic_id == 0){
-		//uart_printf("current thread switched: %p\r\n", scheduler_cur_threads[lapic_id]);
-		//uart_printf("save to thread: %p\r\n", scheduler_prev_threads[lapic_id]);
-	}
+
+	/* TEST BEGIN */
+	uint64_t ts_time_end = HPET_READ_REG(timer_addr, HPET_GENREG_COUNTER);
+	uint64_t ts_time = ts_time_end - ts_time_begin;
+	++root->thr->task_switch_cnt;
+	root->thr->task_switch_avg += ts_time;
+	if(ts_time > root->thr->task_switch_max) root->thr->task_switch_max = ts_time;
+	if(root->thr->task_switch_min == 0 || ts_time < root->thr->task_switch_min) root->thr->task_switch_min = ts_time;
+	/* TEST END */
 
 	return root->thr;
 }

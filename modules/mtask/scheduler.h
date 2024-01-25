@@ -12,7 +12,7 @@
 
 // TODO make these parameters be read from a config file
 #define scheduler_latency 48
-#define min_granularity MTASK_SWITCH_TIMER_TIME
+#define min_granularity 10
 #define default_weight 1024
 #define task_give_delay 1000000 * 500					// delay between giving away tasks, in ns
 #define task_give_thres 15								// threshold on difference between CPU task count and minimum task count, in percents of CPU task count

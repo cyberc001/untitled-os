@@ -8,8 +8,6 @@ static thread_tree_node* thread_tree_rotate(thread_tree* tree, thread_tree_node*
 
 	thread_tree_node* g = p->parent;
 	thread_tree_node* s = p->child[1 - dir];
-	if(!s)
-		uart_printf("RBTREE rotation ERROR %p %p %d %u\r\n", tree, p, dir, lapic_read(LAPIC_REG_ID) >> 24);
 	thread_tree_node* c = s->child[dir];
 
 	p->child[1 - dir] = c; if(c) c->parent = p;
@@ -134,8 +132,10 @@ thread_tree_node* thread_tree_delete(thread_tree* tree, thread_tree_node* n)
 			n->parent->child[dir] = NULL;
 			return n;
 		}
-		else
-			return rbdelete2(tree, n);
+		else{
+			rbdelete2(tree, n);
+			return n;
+		}
 	}
 }
 
@@ -143,8 +143,6 @@ thread_tree_node* rbdelete2(thread_tree* tree, thread_tree_node* n)
 {
 	thread_tree_node* p = n->parent;
 	thread_tree_node *s, *c, *d;
-	//uart_printf("START %p %p\r\n", n, p);
-	//thread_tree_print(tree);
 	int dir = TREE_DIR_CHILD(n);
 	p->child[dir] = NULL;
 	goto start_d;
@@ -153,10 +151,6 @@ thread_tree_node* rbdelete2(thread_tree* tree, thread_tree_node* n)
 		dir = TREE_DIR_CHILD(n);
 start_d:
 		s = p->child[1-dir];
-		/*if(!s){ 
-			uart_printf("BAD %p %p %p\r\n", n, p, p->child[dir-1]);
-			thread_tree_print(tree);
-		}*/
 		d = s->child[1-dir];
 		c = s->child[dir];
 		if(s->clr == TREE_CLR_RED)

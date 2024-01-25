@@ -42,7 +42,7 @@ void thread_pqueue_reset_overflow(thread_pqueue* q)
 	for(size_t i = 0; i < q->size; ++i)
 		q->heap[i]->sleep_overflow = 0;
 }
-
+#include "thread_tree.h"
 void thread_pqueue_push(thread_pqueue* q, thread* thr)
 {
 	if(q->size == q->max_size){

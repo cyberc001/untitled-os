@@ -41,6 +41,10 @@ typedef struct {
 
 	/* TEST BEGIN */
 	size_t last_sched_latency;
+	uint64_t task_switch_avg;
+	uint64_t task_switch_cnt;
+	uint64_t task_switch_min;
+	uint64_t task_switch_max;
 	/* TEST END */
 } thread;
 

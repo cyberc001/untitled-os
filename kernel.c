@@ -103,12 +103,11 @@ void boot_log_write_stub(const char* str, size_t s){}
 
 #include "cpu/x86/apic.h"
 #include "cpu/spinlock.h"
-#define TEST_THREAD_COUNT	32
+#define TEST_THREAD_COUNT	128
 thread** threads;
 void(*mtask_scheduler_dequeue_thread)(thread*);
 volatile size_t tt_start[TEST_THREAD_COUNT];
 volatile size_t tt_end[TEST_THREAD_COUNT];
-volatile int test_thread_ended;
 void ap_test()
 {
 	register int eax asm("eax");
@@ -121,8 +120,6 @@ void ap_test()
 
 	int calc_smth = 0;
 	for(size_t i = 0; i < 1000000000/*10000000 * 5*/; ++i){
-		if(tt_end[thread_i])
-			goto inf_loop;
 		calc_smth = ((calc_smth + 1312) >> 3) % 308959120 * 984859812;
 
 		//size_t rbp; asm("\t movq %%rbx,%0" : "=r"(rbp));
@@ -134,7 +131,6 @@ void ap_test()
 	uart_printf("!!thread %d ended %lu %lu %u %p\r\n", thread_i, tt_start[thread_i], HPET_READ_REG(timer_addr, HPET_GENREG_COUNTER), lapic_id, threads[thread_i]);
 	tt_end[thread_i] = HPET_READ_REG(timer_addr, HPET_GENREG_COUNTER);
 
-inf_loop:
 	if(thread_i == 0){
 		for(;;){
 			int cont = 0;
@@ -144,22 +140,33 @@ inf_loop:
 				break;
 		}
 
-		size_t avg_tt = 0, avg_schlat = 0;
-		size_t min_tt = (size_t)-1, min_schlat = (size_t)-1;
-		size_t max_tt = 0, max_schlat = 0;
+		size_t avg_tt = 0, avg_schlat = 0, avg_ts = 0;
+		size_t min_tt = (size_t)-1, min_schlat = (size_t)-1, min_ts = (size_t)-1;
+		size_t max_tt = 0, max_schlat = 0, max_ts = 0, prep_max_i = 0;
 		for(size_t i = 0; i < TEST_THREAD_COUNT; ++i){
 			size_t tt = tt_end[i] - tt_start[i], schlat = threads[i]->last_sched_latency;
-			uart_printf("[%lu] TT: %lu\tLatency: %lu\r\n", i, tt, schlat);
+			//uart_printf("[%lu] TT: %lu\tLatency: %lu\r\n", i, tt, schlat);
 			avg_tt += tt; avg_schlat += schlat;
 			if(tt < min_tt) min_tt = tt;
 			if(schlat < min_schlat) min_schlat = schlat;
 			if(tt > max_tt) max_tt = tt;
 			if(schlat > max_schlat) max_schlat = schlat;
+
+			if(threads[i]->task_switch_max > threads[prep_max_i]->task_switch_max) prep_max_i = i;
+			uart_printf("%lu %lu %lu\r\n", threads[i]->task_switch_avg, threads[i]->task_switch_min, threads[i]->task_switch_max);
 		}
-		avg_tt /= TEST_THREAD_COUNT; avg_schlat /= TEST_THREAD_COUNT;
-		uart_printf("[AVG] TT: %lu\tLatency: %lu\r\n", avg_tt, avg_schlat);
+		for(size_t i = 0; i < TEST_THREAD_COUNT; ++i){
+			if(i == prep_max_i) continue; // one process spends much more time on first 2 task switches, no idea why
+			threads[i]->task_switch_avg /= threads[i]->task_switch_cnt;
+			avg_ts += threads[i]->task_switch_avg;
+			if(threads[i]->task_switch_min < min_ts) min_ts = threads[i]->task_switch_min;
+			if(threads[i]->task_switch_max > max_ts) max_ts = threads[i]->task_switch_max;
+		}
+		avg_tt /= TEST_THREAD_COUNT; avg_schlat /= TEST_THREAD_COUNT; avg_ts /= TEST_THREAD_COUNT;
+		uart_printf("%lu\t%lu\t%lu\t%lu\t%lu\t%lu\t%lu\t%lu\t%lu\r\n", avg_tt, min_tt, max_tt, avg_schlat, min_schlat, max_schlat, avg_ts, min_ts, max_ts);
+		/*uart_printf("[AVG] TT: %lu\tLatency: %lu\r\n", avg_tt, avg_schlat);
 		uart_printf("[MIN] TT: %lu\tLatency: %lu\r\n", min_tt, min_schlat);
-		uart_printf("[MAX] TT: %lu\tLatency: %lu\r\n", max_tt, max_schlat);
+		uart_printf("[MAX] TT: %lu\tLatency: %lu\r\n", max_tt, max_schlat);*/
 
 		for(;;){}
 	}
