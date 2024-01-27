@@ -74,6 +74,7 @@ int create_mem_hndl(void* _hndl)
 	mem_hndl* hndl = _hndl;
 	// allocate space for PML4 and mark all PML4 entries as not present
 	hndl->pml4 = kmalloc_align(sizeof(uint64_t) * PML4_ENTRIES, PML4_ALIGN);
+
 	if(!hndl->pml4)
 		return VMEM_ERR_NOSPACE;
 	for(uint64_t i = 0; i < PML4_ENTRIES; ++i){

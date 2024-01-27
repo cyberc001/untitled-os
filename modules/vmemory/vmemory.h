@@ -12,6 +12,7 @@
 #define VMEM_FLAG_WRITE						0b0010		// R/W set: pages can be written to (otherwise read-only)
 #define VMEM_FLAG_SIZE_IN_BYTES				0b0100		// usize argument specifies size in bytes, not memory unit
 #define VMEM_FLAG_MAINTAIN_CONTINUITY		0b1000		// allocate a continous chunk of memory (only affects map_alloc)
+#define VMEM_FLAG_IGNORE_ALREADY_ALLOCATED	0b10000		// don't return with an error if memory space is already occupied
 
 #define VMEM_ERR_NOSPACE			-1			// Not enough free space for allocation
 #define VMEM_ERR_PHYS_OCCUPIED		-2			// Specified physical memory is already occupied

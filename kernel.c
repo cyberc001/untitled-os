@@ -103,7 +103,7 @@ void boot_log_write_stub(const char* str, size_t s){}
 
 #include "cpu/x86/apic.h"
 #include "cpu/spinlock.h"
-#define TEST_THREAD_COUNT	128
+#define TEST_THREAD_COUNT	512
 thread** threads;
 void(*mtask_scheduler_dequeue_thread)(thread*);
 volatile size_t tt_start[TEST_THREAD_COUNT];
@@ -119,7 +119,7 @@ void ap_test()
 	tt_end[thread_i] = 0;
 
 	int calc_smth = 0;
-	for(size_t i = 0; i < 1000000000/*10000000 * 5*/; ++i){
+	for(size_t i = 0; i < 1000000000 * 2; ++i){
 		calc_smth = ((calc_smth + 1312) >> 3) % 308959120 * 984859812;
 
 		//size_t rbp; asm("\t movq %%rbx,%0" : "=r"(rbp));
@@ -153,7 +153,7 @@ void ap_test()
 			if(schlat > max_schlat) max_schlat = schlat;
 
 			if(threads[i]->task_switch_max > threads[prep_max_i]->task_switch_max) prep_max_i = i;
-			uart_printf("%lu %lu %lu\r\n", threads[i]->task_switch_avg, threads[i]->task_switch_min, threads[i]->task_switch_max);
+			//uart_printf("%lu %lu %lu\r\n", threads[i]->task_switch_avg, threads[i]->task_switch_min, threads[i]->task_switch_max);
 		}
 		for(size_t i = 0; i < TEST_THREAD_COUNT; ++i){
 			if(i == prep_max_i) continue; // one process spends much more time on first 2 task switches, no idea why
@@ -282,6 +282,7 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	#define KERN_IMG_SIZE (8 * 1024 * 1024)
 	void* err_addr = NULL;
 	struct mmap_entry ments[] = {
+					{(void*)0x3c000, (void*)0x3c000, 0xc3fff, VMEM_FLAG_SIZE_IN_BYTES},
 					// identity map memory heap
 					{KMEM_HEAP_BASE, KMEM_HEAP_BASE, kmem_heap_end - KMEM_HEAP_BASE, VMEM_FLAG_SIZE_IN_BYTES},
 					// identity map APIC base
@@ -378,6 +379,7 @@ void kernel_main(struct stivale2_struct* stivale2_struct)
 	threads = kmalloc(sizeof(void*) * TEST_THREAD_COUNT);
 	for(size_t i = 0; i < TEST_THREAD_COUNT; ++i)
 	{ // schedule test code
+		
 		process pr; mtask_create_process(&pr);
 		thread* th_pt = kmalloc_align(sizeof(thread), 16);
 		memset(th_pt, 0, sizeof(thread));

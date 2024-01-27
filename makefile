@@ -101,6 +101,7 @@ run:
 			 -no-reboot -no-shutdown \
 			 -smp cpus=4,threads=2 \
 			 -d int\
+			 -m 512M
 			 #-S -gdb tcp::1234
 			 #--trace events=qemu_events \
 

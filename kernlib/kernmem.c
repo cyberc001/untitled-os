@@ -65,6 +65,7 @@ void* kmalloc_align(size_t size, size_t align)
 		void* gap_end = it->next;
 		if(((uint64_t)gap_beg + sizeof(kmem_node)) % align) // account for alignment
 			gap_beg += align - ((uint64_t)gap_beg + sizeof(kmem_node)) % align;
+
 		if(gap_end > gap_beg){
 			size_t gap = gap_end - gap_beg;
 			if(gap >= size + sizeof(kmem_node)){
@@ -78,10 +79,8 @@ void* kmalloc_align(size_t size, size_t align)
 				return it->next + 1;
 			}
 		}
-
 		it = it->next;
 	}
-
 	// if no large enough gap was found, mark space after the last (thus farthest in the memory) node allocated
 	void* nblk = (void*)it + sizeof(kmem_node) + it->sz;
 	if(((uint64_t)nblk + sizeof(kmem_node)) % align)
@@ -90,7 +89,8 @@ void* kmalloc_align(size_t size, size_t align)
 		if(vmemory_map_alloc){
 			uint64_t mem_unit_size = vmemory_get_mem_unit_size();
 			void* occupied_to_aligned = occupied_to - (uint64_t)occupied_to % mem_unit_size;
-			if((uint64_t)((nblk + sizeof(kmem_node) + size) - occupied_to_aligned) > mem_unit_size){
+			if((uint64_t)((nblk + sizeof(kmem_node) + size) - occupied_to_aligned) >= mem_unit_size){
+				vmemory_map_alloc(occupied_to_aligned, 1, 0);
 				vmemory_map_alloc(occupied_to_aligned + mem_unit_size,
 									(uint64_t)(nblk + sizeof(kmem_node) + size) - (uint64_t)occupied_to_aligned, VMEM_FLAG_SIZE_IN_BYTES);
 			}
@@ -100,6 +100,7 @@ void* kmalloc_align(size_t size, size_t align)
 		else
 			occupied_to = nblk + sizeof(kmem_node) + size;
 	}
+
 	it->next = nblk;
 	it->next->sz = size;
 	it->next->next = NULL;
