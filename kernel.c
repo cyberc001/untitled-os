@@ -103,7 +103,7 @@ void boot_log_write_stub(const char* str, size_t s){}
 
 #include "cpu/x86/apic.h"
 #include "cpu/spinlock.h"
-#define TEST_THREAD_COUNT	512
+#define TEST_THREAD_COUNT	4
 thread** threads;
 void(*mtask_scheduler_dequeue_thread)(thread*);
 volatile size_t tt_start[TEST_THREAD_COUNT];
@@ -119,7 +119,7 @@ void ap_test()
 	tt_end[thread_i] = 0;
 
 	int calc_smth = 0;
-	for(size_t i = 0; i < 1000000000 * 2; ++i){
+	for(size_t i = 0; i < 2000000000LL; ++i){
 		calc_smth = ((calc_smth + 1312) >> 3) % 308959120 * 984859812;
 
 		//size_t rbp; asm("\t movq %%rbx,%0" : "=r"(rbp));
@@ -128,7 +128,7 @@ void ap_test()
 	}
 
 	uint32_t lapic_id = lapic_read(LAPIC_REG_ID) >> 24;
-	uart_printf("!!thread %d ended %lu %lu %u %p\r\n", thread_i, tt_start[thread_i], HPET_READ_REG(timer_addr, HPET_GENREG_COUNTER), lapic_id, threads[thread_i]);
+	uart_printf("!!thread %d ended %lu %lu %u %p %d\r\n", thread_i, tt_start[thread_i], HPET_READ_REG(timer_addr, HPET_GENREG_COUNTER), lapic_id, threads[thread_i], calc_smth);
 	tt_end[thread_i] = HPET_READ_REG(timer_addr, HPET_GENREG_COUNTER);
 
 	if(thread_i == 0){
