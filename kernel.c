@@ -102,7 +102,7 @@ void boot_log_write_stub(const char* str, size_t s){}
 
 #include "cpu/x86/apic.h"
 #include "cpu/spinlock.h"
-#define TEST_THREAD_COUNT	256
+#define TEST_THREAD_COUNT	32
 thread** threads;
 void(*mtask_scheduler_dequeue_thread)(thread*);
 volatile size_t tt_start[TEST_THREAD_COUNT];

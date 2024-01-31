@@ -40,7 +40,7 @@ static void print_cpu_tree_list()
 	cpu_tree_lnode* cur = cpu_tree_list;
 	while(cur){
 #if USE_THREAD_PQUEUE
-		uart_printf("%p[%u]\tnext: %p\tprev: %p\tthread_cnt: %lu\r\n", cur, cur->tree->cpu_num, cur->next, cur->prev, cur->tree->size);
+		uart_printf("%p[%u]\tnext: %p\tprev: %p\tthread_cnt: %lu\ttree_ptr: %p\r\n", cur, cur->tree->cpu_num, cur->next, cur->prev, cur->tree->size, cur->tree);
 #else
 		uart_printf("%p[%u]\tnext: %p\tprev: %p\tthread_cnt: %lu\r\n", cur, cur->tree->cpu_num, cur->next, cur->prev, cur->tree->thread_cnt);
 #endif
@@ -295,7 +295,7 @@ static uint64_t get_min_vruntime(thread_tree* tree)
 			root = root->child[TREE_DIR_LEFT];
 		return root->thr->vruntime;
 	}
-	return 0;
+	RETUrn 0;
 }
 #endif
 
@@ -461,11 +461,12 @@ thread* scheduler_advance_thread_queue()
 	// Incement it's runtime and re-insert it in the tree
 	th->vruntime += time_passed * timer_res_ns * default_weight / th->weight;
 
-	if(th == tree->heap[0])
+	if(th == tree->heap[0]){
 		thread_sched_pqueue_pop(tree);
+		thread_sched_pqueue_push(tree, th);
+	}
 	else
 		thread_sched_pqueue_heapify(tree);
-	thread_sched_pqueue_push(tree, th);
 #else
 	thread_tree_node* root = tree->root;
 	if(!root){
@@ -494,6 +495,7 @@ thread* scheduler_advance_thread_queue()
 	// Find thread with minimum vruntime
 #if USE_THREAD_PQUEUE
 	thread* cur_thr = tree->heap[0];
+	//uart_printf("cur thr %p %lu\r\n", cur_thr, tree->size);
 #else
 	root = tree->root;
 	while(root->child[TREE_DIR_LEFT])

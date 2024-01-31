@@ -131,5 +131,6 @@ void thread_sched_pqueue_delete(thread_sched_pqueue* q, thread* thr)
 				q->heap[i] = q->heap[q->size - 1];
 			--q->size;
 			thread_sched_pqueue_heapify(q);
+			return;
 		}
 }
