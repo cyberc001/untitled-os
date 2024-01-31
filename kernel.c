@@ -71,7 +71,6 @@ static struct stivale2_header stivale_hdr =
 	// head of linked list of headers:
    	.tags = (uintptr_t)&framebuffer_hdr_tag
 };
-
 // scan for tags wanted from bootloader
 void* stivale2_get_tag(struct stivale2_struct* stivale2_struct, uint64_t id)
 {
@@ -103,7 +102,7 @@ void boot_log_write_stub(const char* str, size_t s){}
 
 #include "cpu/x86/apic.h"
 #include "cpu/spinlock.h"
-#define TEST_THREAD_COUNT	4
+#define TEST_THREAD_COUNT	256
 thread** threads;
 void(*mtask_scheduler_dequeue_thread)(thread*);
 volatile size_t tt_start[TEST_THREAD_COUNT];
@@ -119,13 +118,8 @@ void ap_test()
 	tt_end[thread_i] = 0;
 
 	int calc_smth = 0;
-	for(size_t i = 0; i < 2000000000LL; ++i){
+	for(size_t i = 0; i < 1000000000LL; ++i)
 		calc_smth = ((calc_smth + 1312) >> 3) % 308959120 * 984859812;
-
-		//size_t rbp; asm("\t movq %%rbx,%0" : "=r"(rbp));
-		//uint32_t lapic_id = lapic_read(LAPIC_REG_ID) >> 24;
-		//if(lapic_id == 0 && i % 10000 == 0) uart_printf("%p %lu %lu\r\n", threads[thread_i], i, rbp);
-	}
 
 	uint32_t lapic_id = lapic_read(LAPIC_REG_ID) >> 24;
 	uart_printf("!!thread %d ended %lu %lu %u %p %d\r\n", thread_i, tt_start[thread_i], HPET_READ_REG(timer_addr, HPET_GENREG_COUNTER), lapic_id, threads[thread_i], calc_smth);

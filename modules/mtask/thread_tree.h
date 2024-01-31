@@ -37,7 +37,6 @@ typedef struct {
 	cpu_tree_lnode* list_ptr; // pointer to the list node that contains the tree, used when re-ordering the list when de-queuing a thread
 	spinlock lock;
 } thread_tree;
-thread_tree* cpu_trees;
 
 void thread_tree_print_r(thread_tree_node* n, unsigned depth);
 

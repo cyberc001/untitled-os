@@ -11,11 +11,24 @@
 #include "cpu/x86/apic.h"
 #include "cpu/x86/hpet.h"
 
+#define USE_THREAD_PQUEUE	1
+
 struct cpu_tree_lnode {
+#if USE_THREAD_PQUEUE
+	thread_sched_pqueue* tree;
+#else
 	thread_tree* tree;
+#endif
 	cpu_tree_lnode* next;
 	cpu_tree_lnode* prev;
 };
+
+#if USE_THREAD_PQUEUE
+thread_sched_pqueue* cpu_queues;
+#else
+thread_tree* cpu_trees;
+#endif
+
 static cpu_tree_lnode* cpu_tree_list; // oredered from cpu queue with lowest amount of jobs to highest
 static spinlock cpu_tree_list_lock;
 
@@ -26,7 +39,11 @@ static void print_cpu_tree_list()
 	uart_printf("\r\n");
 	cpu_tree_lnode* cur = cpu_tree_list;
 	while(cur){
+#if USE_THREAD_PQUEUE
+		uart_printf("%p[%u]\tnext: %p\tprev: %p\tthread_cnt: %lu\r\n", cur, cur->tree->cpu_num, cur->next, cur->prev, cur->tree->size);
+#else
 		uart_printf("%p[%u]\tnext: %p\tprev: %p\tthread_cnt: %lu\r\n", cur, cur->tree->cpu_num, cur->next, cur->prev, cur->tree->thread_cnt);
+#endif
 		cur = cur->next;
 	}
 	uart_printf("\r\n");
@@ -45,20 +62,31 @@ static uint64_t timer_res_ns;
 
 int scheduler_init()
 {
+#if USE_THREAD_PQUEUE
+	cpu_queues = kmalloc(sizeof(thread_sched_pqueue) * core_num);
+#else
 	cpu_trees = kmalloc(sizeof(thread_tree) * core_num);
+#endif
 	cpu_sleep_pqueue_list = kmalloc(sizeof(thread_pqueue) * core_num);
 
 	cpu_tree_list = NULL;
 	for(uint8_t i = 0; i < core_num; ++i){
+		cpu_tree_lnode* new_lnode = kmalloc(sizeof(cpu_tree_lnode));
+
+#if USE_THREAD_PQUEUE
+		thread_sched_pqueue* t = cpu_queues + i;
+		thread_pqueue_init((thread_pqueue*)t);
+#else
 		thread_tree* t = cpu_trees + i;
 		t->thread_cnt = 0;
-		t->time_slice = 0;
-		t->root = NULL;
-		t->cpu_num = i;
 		spinlock_init(&t->lock);
+		t->root = NULL;
+#endif
 
-		cpu_tree_lnode* new_lnode = kmalloc(sizeof(cpu_tree_lnode));
+		t->time_slice = 0;
+		t->cpu_num = i;
 		new_lnode->tree = t;
+
 		new_lnode->next = cpu_tree_list;
 		new_lnode->prev = NULL;
 		if(cpu_tree_list)
@@ -102,7 +130,11 @@ void sync_timers()
 		spliced_task_give_delay = scheduler_latency * 10;
 	for(uint8_t i = 0; i < core_num; ++i){
 		timer_prev_val[i] = timer_val;
+#if USE_THREAD_PQUEUE
+		cpu_queues[i].last_give_time = timer_val - spliced_task_give_delay * (i + 1); // oveflow is purely intentional
+#else
 		cpu_trees[i].last_give_time = timer_val - spliced_task_give_delay * (i + 1); // oveflow is purely intentional
+#endif
 	}
 }
 
@@ -114,7 +146,11 @@ static void cpu_tree_list_move_smallest()
 	cpu_tree_lnode* cur = cpu_tree_list->next;
 	if(cur){
 		cpu_tree_lnode* prev = cur->prev;
+#if USE_THREAD_PQUEUE
+		while(cur && cpu_tree_list->tree->size > cur->tree->size){
+#else
 		while(cur && cpu_tree_list->tree->thread_cnt > cur->tree->thread_cnt){
+#endif
 			prev = cur;
 			cur = cur->next;
 		}
@@ -138,13 +174,21 @@ static void cpu_tree_list_move_smallest()
 	spinlock_unlock(&cpu_tree_list_lock);
 }
 // If a thread count decreased for a cpu tree, call this function to move it to the left (closer to the fewer thread count trees)
+#if USE_THREAD_PQUEUE
+static void cpu_tree_list_move_left(thread_sched_pqueue* tree)
+#else
 static void cpu_tree_list_move_left(thread_tree* tree)
+#endif
 {
 	spinlock_lock(&cpu_tree_list_lock);
 	cpu_tree_lnode* cur = tree->list_ptr->prev; // begin at the node previous to the tree in question
 
 	if(cur){ // if the tree is not at the beginning already
+#if USE_THREAD_PQUEUE
+		while(cur && tree->size < cur->tree->size)
+#else
 		while(cur && tree->thread_cnt < cur->tree->thread_cnt)
+#endif
 			cur = cur->prev;
 		if(!cur){ // reached the beginning of the list, still have the smallest amount of threads
 			/*if(tree->list_ptr->prev) not needed, outer if checks for it already */
@@ -177,54 +221,72 @@ static void cpu_tree_list_move_left(thread_tree* tree)
 
 static void endless_loop() { while(1) ; } // this loop is executed until 1st thread is added to the AP that executes it
 
+#if USE_THREAD_PQUEUE
+static void thread_tree_add(thread_sched_pqueue* tree, thread* th)
+#else
 static void thread_tree_add(thread_tree* tree, thread* th)
+#endif
 {
-	uint32_t lapic_id = lapic_read(LAPIC_REG_ID) >> 24;
-	/*if(lapic_id == 0){
-		uart_printf("BEFORE ADD %p (tree %p):\r\n", th, tree);
-		thread_tree_print(tree);
-	}*/
-
 	uint64_t min_vruntime = 0;
+#if USE_THREAD_PQUEUE
+	min_vruntime = tree->heap ? tree->heap[0]->vruntime : 0;
+	tree->time_slice = scheduler_latency / (tree->size + 1);
+#else
 	thread_tree_node* root = tree->root;
 	if(root){
 		while(root->child[TREE_DIR_LEFT])
 			root = root->child[TREE_DIR_LEFT];
 		min_vruntime = root->thr->vruntime;
 	}
-	th->vruntime = min_vruntime;
-
 	++tree->thread_cnt;
 	tree->time_slice = scheduler_latency / tree->thread_cnt;
+#endif
+	th->vruntime = min_vruntime;
+
 	if(tree->time_slice < min_granularity)
 		tree->time_slice = min_granularity;
 
 	tree->time_slice *= 1000000;
+	th->tree = tree;
+#if USE_THREAD_PQUEUE
+	thread_sched_pqueue_push(tree, th);
+#else
 	thread_tree_node* n = kmalloc(sizeof(thread_tree_node));
 	n->thr = th;
-	th->hndl = n; th->tree = tree;
+	th->hndl = n; 
 	thread_tree_insert(tree, n);
-
-	/*if(lapic_id == 0){
-		uart_printf("AFTER ADD %p (tree %p):\r\n", th, tree);
-		thread_tree_print(tree);
-	}*/
+#endif
 }
 static void thread_tree_remove(thread* th)
 {
+#if USE_THREAD_PQUEUE
+	thread_sched_pqueue* tree = th->tree;
+#else
 	thread_tree* tree = th->tree;
-
-	uint32_t lapic_id = lapic_read(LAPIC_REG_ID) >> 24;
 	--tree->thread_cnt;
 	tree->time_slice = tree->thread_cnt ? scheduler_latency / tree->thread_cnt : 0;
+#endif
+
+	uint32_t lapic_id = lapic_read(LAPIC_REG_ID) >> 24;
 	if(tree->time_slice < min_granularity)
 		tree->time_slice = min_granularity;
 	tree->time_slice *= 1000000;
 
+#if USE_THREAD_PQUEUE
+	thread_sched_pqueue_delete(tree, th);
+	tree->time_slice = tree->size ? scheduler_latency / tree->size : 0;
+#else
 	thread_tree_node* n = thread_tree_delete(tree, th->hndl);
 	kfree(n);
+#endif
 }
 
+#if USE_THREAD_PQUEUE
+static uint64_t get_min_vruntime(thread_sched_pqueue* tree)
+{
+	return tree->size > 0 ? tree->heap[0]->vruntime : 0;
+}
+#else
 static uint64_t get_min_vruntime(thread_tree* tree)
 {
 	thread_tree_node* root = tree->root;
@@ -235,11 +297,16 @@ static uint64_t get_min_vruntime(thread_tree* tree)
 	}
 	return 0;
 }
+#endif
 
 void scheduler_queue_thread(thread* th)
 {
 	uart_printf("%p thread queue:\r\n", th);
+#if USE_THREAD_PQUEUE
+	thread_sched_pqueue* tree = cpu_tree_list->tree;
+#else
 	thread_tree* tree = cpu_tree_list->tree;
+#endif
 	spinlock_lock(&tree->lock);
 	th->vruntime = get_min_vruntime(tree);
 	// Find a tree with least amount of jobs (using binary heap)
@@ -256,9 +323,15 @@ void scheduler_queue_thread(thread* th)
 void scheduler_dequeue_thread(thread* th)
 {
 	uart_printf("%p thread dequeue %p:\r\n", th, th->tree);
+#if USE_THREAD_PQUEUE
+	spinlock_lock(&((thread_sched_pqueue*)th->tree)->lock);
+	thread_tree_remove(th);
+	spinlock_unlock(&((thread_sched_pqueue*)th->tree)->lock);
+#else
 	spinlock_lock(&((thread_tree*)th->tree)->lock);
 	thread_tree_remove(th);
 	spinlock_unlock(&((thread_tree*)th->tree)->lock);
+#endif
 	cpu_tree_list_move_left(th->tree);
 }
 void scheduler_sleep_thread(thread* th, uint64_t time_ns)
@@ -273,7 +346,11 @@ void scheduler_sleep_thread(thread* th, uint64_t time_ns)
 	th->sleep_until = timer_val + time_ns;
 
 	scheduler_dequeue_thread(th);
+#if USE_THREAD_PQUEUE
+	thread_pqueue* q = &cpu_sleep_pqueue_list[((thread_sched_pqueue*)th->tree)->cpu_num];
+#else
 	thread_pqueue* q = &cpu_sleep_pqueue_list[((thread_tree*)th->tree)->cpu_num];
+#endif
 	spinlock_lock(&q->lock);
 	thread_pqueue_push(q, th);
 	spinlock_unlock(&q->lock);
@@ -284,11 +361,6 @@ static uint64_t ts_time_left = 0; // tracks time before an actual task switch
 thread* scheduler_advance_thread_queue()
 {
 	uint32_t lapic_id = lapic_read(LAPIC_REG_ID) >> 24;
-	//if(lapic_id == 0){
-		//uart_printf("current thread: %p\r\n", scheduler_cur_threads[lapic_id]);
-		//if(scheduler_cur_threads[lapic_id])
-		//	uart_printf("switched rbx to: %lu (%p)\r\n", scheduler_cur_threads[lapic_id]->state.rbx, scheduler_cur_threads[lapic_id]);
-	//}
 
 	// Measure time passed since last interrupt
 	uint64_t timer_val = HPET_READ_REG(timer_addr, HPET_GENREG_COUNTER);
@@ -314,7 +386,11 @@ thread* scheduler_advance_thread_queue()
 		/* TEST END */
 	}
 
+#if USE_THREAD_PQUEUE
+	thread_sched_pqueue* tree = &cpu_queues[lapic_id];
+#else
 	thread_tree* tree = &cpu_trees[lapic_id];
+#endif
 	spinlock_lock(&tree->lock);
 	// Check if it's time to give tasks
 	uint64_t time_passed_after_give = tree->last_give_time;
@@ -324,9 +400,15 @@ thread* scheduler_advance_thread_queue()
 		time_passed_after_give = timer_val - time_passed_after_give;
 
 	if(time_passed_after_give >= task_give_delay){
+#if USE_THREAD_PQUEUE
+		uint64_t min_count = cpu_tree_list->tree->size;
+		uint64_t task_count_diff = tree->size - min_count;
+		uint64_t thres_amt = tree->size * task_give_thres / 100;
+#else
 		uint64_t min_count = cpu_tree_list->tree->thread_cnt;
 		uint64_t task_count_diff = tree->thread_cnt - min_count;
 		uint64_t thres_amt = tree->thread_cnt * task_give_thres / 100;
+#endif
 		if(thres_amt < task_give_thres_min)
 			thres_amt = task_give_thres_min;
 		if(task_count_diff >= thres_amt){ // time to give away some jobs
@@ -334,10 +416,15 @@ thread* scheduler_advance_thread_queue()
 
 			uart_printf("\r\n#%u has to give %lu jobs to #%u (diff %lu)\r\n", lapic_id, give_amt, cpu_tree_list->tree->cpu_num, task_count_diff);
 			for(; give_amt != 0; --give_amt){
+#if USE_THREAD_PQUEUE
+				thread* th = thread_sched_pqueue_pop(tree);
+				cpu_tree_list_move_left(tree);
+#else
 				thread* th = tree->root->thr; // a bit of code duplication but this avoids double locking current CPU tree spinlock
 				thread_tree_remove(tree->root->thr);
 				cpu_tree_list_move_left(tree);
-				scheduler_queue_thread(th); // this locks minimum thread count CPU tree - actually important
+#endif
+				scheduler_queue_thread(th);
 			}
 		}
 		tree->last_give_time = timer_val;
@@ -359,6 +446,27 @@ thread* scheduler_advance_thread_queue()
 	/* TEST END */
 
 	// Find current thread
+#if USE_THREAD_PQUEUE
+	if(!tree->size){
+		spinlock_unlock(&tree->lock);
+		return NULL;
+	}
+
+	thread* th;
+	if(!scheduler_cur_threads[lapic_id])
+		th = tree->heap[0];
+	else
+		th = scheduler_cur_threads[lapic_id];
+
+	// Incement it's runtime and re-insert it in the tree
+	th->vruntime += time_passed * timer_res_ns * default_weight / th->weight;
+
+	if(th == tree->heap[0])
+		thread_sched_pqueue_pop(tree);
+	else
+		thread_sched_pqueue_heapify(tree);
+	thread_sched_pqueue_push(tree, th);
+#else
 	thread_tree_node* root = tree->root;
 	if(!root){
 		spinlock_unlock(&tree->lock);
@@ -376,41 +484,32 @@ thread* scheduler_advance_thread_queue()
 	root->thr->vruntime += time_passed * timer_res_ns * default_weight / root->thr->weight;
 	thread_tree_node root_cpy = *root;
 
-	/*if(lapic_id == 0){
-		uart_printf("BEFORE\r\n");
-		thread_tree_print(tree);
-	}*/
 	thread_tree_node* root_addr = thread_tree_delete(tree, root);
-	/*if(lapic_id == 0){
-		uart_printf("DELETE %p\r\n", root->thr);
-		thread_tree_print(tree);
-	}*/
 	*root_addr = root_cpy;
 	thread_tree_insert(tree, root_addr);
-	/*if(lapic_id == 0){
-		uart_printf("INSERT %p\r\n", root_addr->thr);
-		thread_tree_print(tree);
-	}*/
+#endif
+
 	spinlock_unlock(&tree->lock);
 
-//	if(lapic_id == 2)
-//		uart_printf("switched rbx from: %lu (%p)\r\n", root_addr->thr->state.rbx, root_addr->thr);
-
-
 	// Find thread with minimum vruntime
+#if USE_THREAD_PQUEUE
+	thread* cur_thr = tree->heap[0];
+#else
 	root = tree->root;
 	while(root->child[TREE_DIR_LEFT])
 		root = root->child[TREE_DIR_LEFT];
-	scheduler_cur_threads[lapic_id] = scheduler_prev_threads[lapic_id] = root->thr;
+	thread* cur_thr = root->thr;
+#endif
+	scheduler_cur_threads[lapic_id] = scheduler_prev_threads[lapic_id] = cur_thr;
 
 	/* TEST BEGIN */
 	uint64_t ts_time_end = HPET_READ_REG(timer_addr, HPET_GENREG_COUNTER);
 	uint64_t ts_time = ts_time_end - ts_time_begin;
-	++root->thr->task_switch_cnt;
-	root->thr->task_switch_avg += ts_time;
-	if(ts_time > root->thr->task_switch_max) root->thr->task_switch_max = ts_time;
-	if(root->thr->task_switch_min == 0 || ts_time < root->thr->task_switch_min) root->thr->task_switch_min = ts_time;
+	++cur_thr->task_switch_cnt;
+	cur_thr->task_switch_avg += ts_time;
+	if(ts_time > cur_thr->task_switch_max) cur_thr->task_switch_max = ts_time;
+	if(cur_thr->task_switch_min == 0 || ts_time < cur_thr->task_switch_min) cur_thr->task_switch_min = ts_time;
 	/* TEST END */
 
-	return root->thr;
+	return cur_thr;
 }
